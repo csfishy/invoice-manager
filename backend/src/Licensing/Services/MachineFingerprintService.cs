@@ -1,6 +1,7 @@
 using System.Management;
 using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
 using InvoiceManager.Licensing.Configuration;
@@ -68,6 +69,7 @@ public sealed class MachineFingerprintService(IOptions<LicensingOptions> options
         yield return Environment.ProcessorCount.ToString();
     }
 
+    [SupportedOSPlatform("windows")]
     private static IEnumerable<string> QueryWindowsHardwareIdentifiers()
     {
         foreach (var query in new[]
@@ -86,13 +88,15 @@ public sealed class MachineFingerprintService(IOptions<LicensingOptions> options
         }
     }
 
+    [SupportedOSPlatform("windows")]
     private static IEnumerable<string> ExecuteWmiQuery(string className, string propertyName)
     {
-        ManagementObjectCollection? collection = null;
+        var results = new List<string>();
+
         try
         {
             using var searcher = new ManagementObjectSearcher($"SELECT {propertyName} FROM {className}");
-            collection = searcher.Get();
+            using var collection = searcher.Get();
 
             foreach (var item in collection)
             {
@@ -101,19 +105,17 @@ public sealed class MachineFingerprintService(IOptions<LicensingOptions> options
                     var value = managementObject[propertyName]?.ToString();
                     if (!string.IsNullOrWhiteSpace(value))
                     {
-                        yield return value;
+                        results.Add(value);
                     }
                 }
             }
         }
         catch
         {
-            yield break;
+            return Array.Empty<string>();
         }
-        finally
-        {
-            collection?.Dispose();
-        }
+
+        return results;
     }
 
     private static void AddComponent(ISet<string> components, string? value)

@@ -18,7 +18,7 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<MachineFingerprintService>();
         services.AddSingleton<ILicenseSignatureVerifier, RsaLicenseSignatureVerifier>();
-        services.AddSingleton<ILicenseStatusService, LicenseStatusService>();
+        services.AddScoped<ILicenseStatusService, LicenseStatusService>();
         services.AddHostedService<LicenseStartupValidationHostedService>();
         return services;
     }
