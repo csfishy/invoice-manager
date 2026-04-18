@@ -161,11 +161,11 @@ namespace InvoiceManager.Infrastructure.Persistence.Migrations
             migrationBuilder.Sql($"""
                 UPDATE bills
                 SET "BillCategoryId" = CASE
-                    WHEN "Type" = 'Water' THEN '{WaterCategoryId}'
-                    WHEN "Type" = 'Electricity' THEN '{ElectricityCategoryId}'
-                    WHEN "Type" = 'Gas' THEN '{GasCategoryId}'
-                    WHEN "Type" = 'Tax' THEN '{TaxCategoryId}'
-                    ELSE '{WaterCategoryId}'
+                    WHEN "Type" = 'Water' THEN '{WaterCategoryId}'::uuid
+                    WHEN "Type" = 'Electricity' THEN '{ElectricityCategoryId}'::uuid
+                    WHEN "Type" = 'Gas' THEN '{GasCategoryId}'::uuid
+                    WHEN "Type" = 'Tax' THEN '{TaxCategoryId}'::uuid
+                    ELSE '{WaterCategoryId}'::uuid
                 END
                 WHERE "BillCategoryId" IS NULL;
                 """);
