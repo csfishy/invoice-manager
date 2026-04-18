@@ -1,0 +1,11 @@
+.env
+backups/
+data/
+
+frontend/node_modules/
+frontend/.next/
+
+backend/**/bin/
+backend/**/obj/
+
+TestResults/
