@@ -13,10 +13,13 @@ public static class ServiceCollectionExtensions
         services.AddOptions<LicensingOptions>()
             .Bind(configuration.GetSection(LicensingOptions.SectionName))
             .Validate(x => !string.IsNullOrWhiteSpace(x.LicenseFilePath), "License file path is required.")
+            .Validate(x => !string.IsNullOrWhiteSpace(x.FingerprintSalt), "Fingerprint salt is required.")
             .ValidateOnStart();
 
         services.AddSingleton<MachineFingerprintService>();
+        services.AddSingleton<ILicenseSignatureVerifier, RsaLicenseSignatureVerifier>();
         services.AddSingleton<ILicenseStatusService, LicenseStatusService>();
+        services.AddHostedService<LicenseStartupValidationHostedService>();
         return services;
     }
 }

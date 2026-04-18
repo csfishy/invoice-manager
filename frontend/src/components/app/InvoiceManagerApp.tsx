@@ -18,6 +18,7 @@ import type {
   CurrentUser,
   DashboardSummary,
   LicenseFingerprint,
+  LicenseRequestCode,
   LicenseStatus,
   PagedResult,
   PaymentStatus,
@@ -110,6 +111,7 @@ export function InvoiceManagerApp() {
   const [auditLogs, setAuditLogs] = useState<PagedResult<AuditLog> | null>(null);
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
   const [fingerprint, setFingerprint] = useState<LicenseFingerprint | null>(null);
+  const [requestCode, setRequestCode] = useState<LicenseRequestCode | null>(null);
 
   const [filters, setFilters] = useState<BillFilters>(emptyFilters);
   const [billForm, setBillForm] = useState<BillFormValues>(emptyBillForm);
@@ -179,12 +181,18 @@ export function InvoiceManagerApp() {
       setCurrentUser(me);
       setLoginError(null);
 
-      const [_, __, loadedCategories] = await Promise.all([
+      const license = me.role === "Admin" ? await loadLicense(activeToken) : null;
+      if (license && !license.isValid) {
+        setActiveView("license");
+        setPageError(license.message);
+        return;
+      }
+
+      const loadedCategories = await loadCategories(activeToken, me.role === "Admin");
+      await Promise.all([
         loadDashboard(activeToken),
         loadBills(activeToken, 1, emptyFilters),
-        loadCategories(activeToken, me.role === "Admin"),
         me.role === "Admin" ? loadAuditLogs(activeToken) : Promise.resolve(),
-        me.role === "Admin" ? loadLicense(activeToken) : Promise.resolve(),
       ]);
 
       setBillForm((previous) => ({
@@ -192,7 +200,12 @@ export function InvoiceManagerApp() {
         billCategoryId:
           loadedCategories.find((category) => category.type === previous.type && category.isActive)?.id ?? "",
       }));
-    } catch {
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 403) {
+        setPageError(error.message);
+        return;
+      }
+
       window.localStorage.removeItem("invoice-manager-token");
       setToken(null);
       setCurrentUser(null);
@@ -205,6 +218,11 @@ export function InvoiceManagerApp() {
   async function refreshActiveView(activeToken: string, role: UserRole) {
     try {
       setPageError(null);
+
+      if (activeView === "license" && role === "Admin") {
+        await loadLicense(activeToken);
+        return;
+      }
 
       if (activeView === "dashboard") {
         await loadDashboard(activeToken);
@@ -224,11 +242,11 @@ export function InvoiceManagerApp() {
       if (activeView === "audit" && role === "Admin") {
         await loadAuditLogs(activeToken);
       }
-
-      if (activeView === "license" && role === "Admin") {
-        await loadLicense(activeToken);
-      }
     } catch (error) {
+      if (error instanceof ApiError && error.status === 403 && role === "Admin") {
+        setActiveView("license");
+      }
+
       setPageError(error instanceof Error ? error.message : "Unable to load the requested page.");
     }
   }
@@ -259,6 +277,7 @@ export function InvoiceManagerApp() {
     setAuditLogs(null);
     setLicenseStatus(null);
     setFingerprint(null);
+    setRequestCode(null);
     setSelectedBill(null);
     setEditingBillId(null);
     setEditingCategoryId(null);
@@ -327,13 +346,16 @@ export function InvoiceManagerApp() {
   }
 
   async function loadLicense(activeToken: string) {
-    const [status, machineFingerprint] = await Promise.all([
+    const [status, machineFingerprint, nextRequestCode] = await Promise.all([
       apiRequest<LicenseStatus>("/api/license/status", { token: activeToken }),
       apiRequest<LicenseFingerprint>("/api/license/fingerprint", { token: activeToken }),
+      apiRequest<LicenseRequestCode>("/api/license/request-code", { token: activeToken }),
     ]);
 
     setLicenseStatus(status);
     setFingerprint(machineFingerprint);
+    setRequestCode(nextRequestCode);
+    return status;
   }
 
   async function handleBillSearch() {
@@ -1415,6 +1437,10 @@ export function InvoiceManagerApp() {
       {activeView === "license" && isAdmin && licenseStatus ? (
         <section className="stack">
           <Panel title="License Status">
+            {!licenseStatus.isValid ? (
+              <p className="inline-error">{licenseStatus.message}</p>
+            ) : null}
+
             <div className="detail-grid">
               <DetailItem label="Status" value={licenseStatus.status} badge />
               <DetailItem label="License ID" value={licenseStatus.licenseId ?? "Not imported"} />
@@ -1424,12 +1450,38 @@ export function InvoiceManagerApp() {
               <DetailItem label="Checked At" value={licenseStatus.checkedAtUtc} />
             </div>
 
+            {requestCode ? (
+              <>
+                <Field label="Machine Request Code">
+                  <TextArea rows={6} readOnly value={requestCode.requestCode} />
+                </Field>
+
+                <div className="detail-grid">
+                  <DetailItem label="Product" value={requestCode.productName} />
+                  <DetailItem label="Machine Name" value={requestCode.machineName} />
+                  <DetailItem label="Generated At" value={requestCode.generatedAtUtc} />
+                  <DetailItem label="Format" value={requestCode.format} />
+                </div>
+              </>
+            ) : null}
+
             <Field label="Machine Fingerprint Hash">
               <TextArea rows={3} readOnly value={fingerprint?.fingerprintHash ?? ""} />
             </Field>
 
             <Field label="Validation Message">
               <TextArea rows={3} readOnly value={licenseStatus.message} />
+            </Field>
+
+            <Field label="Activation Guidance">
+              <TextArea
+                rows={4}
+                readOnly
+                value={
+                  requestCode?.message ??
+                  "Generate a request code, send it to the vendor, and import the signed license file returned to you."
+                }
+              />
             </Field>
 
             <div className="toolbar">
@@ -1447,6 +1499,14 @@ export function InvoiceManagerApp() {
                 />
                 Import License
               </label>
+              {requestCode ? (
+                <Button
+                  variant="secondary"
+                  onClick={() => void navigator.clipboard.writeText(requestCode.requestCode)}
+                >
+                  Copy Request Code
+                </Button>
+              ) : null}
               <Button variant="secondary" onClick={() => void loadLicense(token)}>
                 Refresh Status
               </Button>

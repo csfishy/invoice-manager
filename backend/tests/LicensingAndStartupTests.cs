@@ -25,6 +25,45 @@ public sealed class LicensingAndStartupTests(TestApiFactory factory) : IClassFix
         Assert.False(payload!.IsValid);
         Assert.Equal("MissingLicense", payload.Status);
         Assert.False(string.IsNullOrWhiteSpace(payload.FingerprintHash));
+        Assert.True(payload.RequiresActivation);
+    }
+
+    [Fact]
+    public async Task LicenseRequestCode_IsReturnedForAdmin()
+    {
+        var auth = await TestAuthHelper.LoginAsAdminAsync(_client);
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", auth.AccessToken);
+
+        var payload = await _client.GetFromJsonAsync<LicenseRequestCodeDto>("/api/license/request-code", TestJson.Options);
+
+        Assert.NotNull(payload);
+        Assert.False(string.IsNullOrWhiteSpace(payload!.RequestCode));
+        Assert.False(string.IsNullOrWhiteSpace(payload.FingerprintHash));
+    }
+
+    [Fact]
+    public async Task AuthenticatedBusinessEndpoint_IsRejectedWhenLicenseIsMissing()
+    {
+        var previousValue = Environment.GetEnvironmentVariable("Licensing__AllowUnlicensedDevelopmentMode");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("Licensing__AllowUnlicensedDevelopmentMode", "false");
+
+            await using var strictFactory = new TestApiFactory();
+            await strictFactory.InitializeAsync();
+            using var client = strictFactory.CreateClient();
+            var auth = await TestAuthHelper.LoginAsAdminAsync(client);
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", auth.AccessToken);
+
+            var response = await client.GetAsync("/api/dashboard/summary");
+
+            Assert.Equal(System.Net.HttpStatusCode.Forbidden, response.StatusCode);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("Licensing__AllowUnlicensedDevelopmentMode", previousValue);
+        }
     }
 
     [Fact]

@@ -104,7 +104,7 @@ app.MapGet("/api/me", async (ClaimsPrincipal user, IAuthService authService, Can
 app.MapGet("/api/dashboard/summary", async (IDashboardService dashboardService, CancellationToken cancellationToken) =>
 {
     return Results.Ok(await dashboardService.GetSummaryAsync(cancellationToken));
-}).RequireAuthorization("Authenticated");
+}).RequireAuthorization("Authenticated").AddEndpointFilter<RequireValidLicenseFilter>();
 
 app.MapGet("/api/bills", async (
     BillType? billType,
@@ -138,7 +138,7 @@ app.MapGet("/api/bills", async (
         page ?? 1,
         pageSize ?? 20);
     return Results.Ok(await billService.GetBillsAsync(query, cancellationToken));
-}).RequireAuthorization("Authenticated");
+}).RequireAuthorization("Authenticated").AddEndpointFilter<RequireValidLicenseFilter>();
 
 app.MapGet("/api/categories", async (
     bool includeInactive,
@@ -146,13 +146,13 @@ app.MapGet("/api/categories", async (
     CancellationToken cancellationToken) =>
 {
     return Results.Ok(await billService.GetCategoriesAsync(includeInactive, cancellationToken));
-}).RequireAuthorization("Authenticated");
+}).RequireAuthorization("Authenticated").AddEndpointFilter<RequireValidLicenseFilter>();
 
 app.MapGet("/api/categories/{categoryId:guid}", async (Guid categoryId, IBillService billService, CancellationToken cancellationToken) =>
 {
     var category = await billService.GetCategoryAsync(categoryId, cancellationToken);
     return category is null ? Results.NotFound() : Results.Ok(category);
-}).RequireAuthorization("Authenticated");
+}).RequireAuthorization("Authenticated").AddEndpointFilter<RequireValidLicenseFilter>();
 
 app.MapPost("/api/categories", async (
     CreateBillCategoryRequestDto request,
@@ -175,7 +175,7 @@ app.MapPost("/api/categories", async (
     {
         return Results.Conflict(new { title = exception.Message });
     }
-}).RequireAuthorization("AdminAccess");
+}).RequireAuthorization("AdminAccess").AddEndpointFilter<RequireValidLicenseFilter>();
 
 app.MapPut("/api/categories/{categoryId:guid}", async (
     Guid categoryId,
@@ -199,7 +199,7 @@ app.MapPut("/api/categories/{categoryId:guid}", async (
     {
         return Results.Conflict(new { title = exception.Message });
     }
-}).RequireAuthorization("AdminAccess");
+}).RequireAuthorization("AdminAccess").AddEndpointFilter<RequireValidLicenseFilter>();
 
 app.MapDelete("/api/categories/{categoryId:guid}", async (
     Guid categoryId,
@@ -216,13 +216,13 @@ app.MapDelete("/api/categories/{categoryId:guid}", async (
     {
         return Results.Conflict(new { title = exception.Message });
     }
-}).RequireAuthorization("AdminAccess");
+}).RequireAuthorization("AdminAccess").AddEndpointFilter<RequireValidLicenseFilter>();
 
 app.MapGet("/api/bills/{billId:guid}", async (Guid billId, IBillService billService, CancellationToken cancellationToken) =>
 {
     var bill = await billService.GetBillAsync(billId, cancellationToken);
     return bill is null ? Results.NotFound() : Results.Ok(bill);
-}).RequireAuthorization("Authenticated");
+}).RequireAuthorization("Authenticated").AddEndpointFilter<RequireValidLicenseFilter>();
 
 app.MapPost("/api/bills", async (
     CreateBillRequestDto request,
@@ -245,7 +245,7 @@ app.MapPost("/api/bills", async (
     {
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["billCategoryId"] = [exception.Message] });
     }
-}).RequireAuthorization("OperatorAccess");
+}).RequireAuthorization("OperatorAccess").AddEndpointFilter<RequireValidLicenseFilter>();
 
 app.MapPut("/api/bills/{billId:guid}", async (
     Guid billId,
@@ -269,7 +269,7 @@ app.MapPut("/api/bills/{billId:guid}", async (
     {
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["billCategoryId"] = [exception.Message] });
     }
-}).RequireAuthorization("OperatorAccess");
+}).RequireAuthorization("OperatorAccess").AddEndpointFilter<RequireValidLicenseFilter>();
 
 app.MapDelete("/api/bills/{billId:guid}", async (
     Guid billId,
@@ -279,7 +279,7 @@ app.MapDelete("/api/bills/{billId:guid}", async (
 {
     var deleted = await billService.DeleteBillAsync(billId, user.GetRequiredUserId(), user.GetRequiredUsername(), cancellationToken);
     return deleted ? Results.NoContent() : Results.NotFound();
-}).RequireAuthorization("AdminAccess");
+}).RequireAuthorization("AdminAccess").AddEndpointFilter<RequireValidLicenseFilter>();
 
 app.MapPost("/api/bills/{billId:guid}/attachments", async (
     Guid billId,
@@ -323,13 +323,13 @@ app.MapPost("/api/bills/{billId:guid}/attachments", async (
         cancellationToken);
 
     return attachment is null ? Results.NotFound() : Results.Ok(attachment);
-}).RequireAuthorization("OperatorAccess");
+}).RequireAuthorization("OperatorAccess").AddEndpointFilter<RequireValidLicenseFilter>();
 
 app.MapGet("/api/attachments/{attachmentId:guid}/metadata", async (Guid attachmentId, IBillService billService, CancellationToken cancellationToken) =>
 {
     var metadata = await billService.GetAttachmentAsync(attachmentId, cancellationToken);
     return metadata is null ? Results.NotFound() : Results.Ok(metadata);
-}).RequireAuthorization("Authenticated");
+}).RequireAuthorization("Authenticated").AddEndpointFilter<RequireValidLicenseFilter>();
 
 app.MapGet("/api/attachments/{attachmentId:guid}", async (Guid attachmentId, IBillService billService, CancellationToken cancellationToken) =>
 {
@@ -343,7 +343,7 @@ app.MapGet("/api/attachments/{attachmentId:guid}", async (Guid attachmentId, IBi
     return stream is null
         ? Results.NotFound()
         : Results.File(stream, metadata.ContentType, metadata.OriginalFileName);
-}).RequireAuthorization("Authenticated");
+}).RequireAuthorization("Authenticated").AddEndpointFilter<RequireValidLicenseFilter>();
 
 app.MapDelete("/api/attachments/{attachmentId:guid}", async (
     Guid attachmentId,
@@ -353,7 +353,7 @@ app.MapDelete("/api/attachments/{attachmentId:guid}", async (
 {
     var deleted = await billService.DeleteAttachmentAsync(attachmentId, user.GetRequiredUserId(), user.GetRequiredUsername(), cancellationToken);
     return deleted ? Results.NoContent() : Results.NotFound();
-}).RequireAuthorization("OperatorAccess");
+}).RequireAuthorization("OperatorAccess").AddEndpointFilter<RequireValidLicenseFilter>();
 
 app.MapGet("/api/audit-logs", async (
     int? page,
@@ -362,7 +362,7 @@ app.MapGet("/api/audit-logs", async (
     CancellationToken cancellationToken) =>
 {
     return Results.Ok(await auditLogService.GetAuditLogsAsync(page ?? 1, pageSize ?? 20, cancellationToken));
-}).RequireAuthorization("AdminAccess");
+}).RequireAuthorization("AdminAccess").AddEndpointFilter<RequireValidLicenseFilter>();
 
 app.MapGet("/api/license/status", async (ILicenseStatusService licenseStatusService, CancellationToken cancellationToken) =>
 {
@@ -373,6 +373,11 @@ app.MapGet("/api/license/fingerprint", async (ILicenseStatusService licenseStatu
 {
     var fingerprint = await licenseStatusService.GetCurrentFingerprintHashAsync(cancellationToken);
     return Results.Ok(new LicenseFingerprintDto(fingerprint, DateTime.UtcNow));
+}).RequireAuthorization("AdminAccess");
+
+app.MapGet("/api/license/request-code", async (ILicenseStatusService licenseStatusService, CancellationToken cancellationToken) =>
+{
+    return Results.Ok(await licenseStatusService.GetCurrentRequestCodeAsync(cancellationToken));
 }).RequireAuthorization("AdminAccess");
 
 app.MapPost("/api/license/import", async (

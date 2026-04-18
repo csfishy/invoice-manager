@@ -13,6 +13,7 @@ Self-hosted bill management system for customer-operated Windows environments.
 - dashboard summary with totals, by-type metrics, and upcoming due bills
 - audit log tracking for important actions
 - offline-first machine-bound licensing status and license import
+- offline request-code workflow for vendor-issued signed licenses
 - Docker Compose deployment with Windows helper scripts
 
 ## Tech Stack
@@ -50,6 +51,7 @@ invoice-manager/
 5. Open `http://localhost:3000`.
 6. Sign in with the seeded admin account from `.env`.
 7. Import a license file from the Licensing screen if you have one.
+8. In development only, you may set `LICENSE_ALLOW_UNLICENSED_DEVELOPMENT_MODE=true` to bypass license enforcement while keeping status visibility.
 
 ## Development Defaults
 

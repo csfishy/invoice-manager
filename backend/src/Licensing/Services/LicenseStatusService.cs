@@ -1,16 +1,22 @@
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using InvoiceManager.Application.Licensing;
+using InvoiceManager.Domain.Licensing;
+using InvoiceManager.Infrastructure.Persistence;
 using InvoiceManager.Licensing.Configuration;
 using InvoiceManager.Licensing.Models;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace InvoiceManager.Licensing.Services;
 
 public sealed class LicenseStatusService(
     MachineFingerprintService machineFingerprintService,
-    IOptions<LicensingOptions> options) : ILicenseStatusService
+    ILicenseSignatureVerifier signatureVerifier,
+    InvoiceManagerDbContext dbContext,
+    IOptions<LicensingOptions> options,
+    ILogger<LicenseStatusService> logger) : ILicenseStatusService
 {
     private readonly LicensingOptions _options = options.Value;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
@@ -20,8 +26,41 @@ public sealed class LicenseStatusService(
         return Task.FromResult(machineFingerprintService.GetHashedFingerprint());
     }
 
+    public Task<LicenseRequestCodeDto> GetCurrentRequestCodeAsync(CancellationToken cancellationToken = default)
+    {
+        var payload = new LicenseRequestPayload
+        {
+            ProductName = _options.LicensedProductName,
+            MachineName = machineFingerprintService.GetMachineName(),
+            MachineFingerprintHash = machineFingerprintService.GetHashedFingerprint(),
+            GeneratedAtUtc = DateTime.UtcNow
+        };
+
+        var requestCode = Convert.ToBase64String(Encoding.UTF8.GetBytes(LicensePayloadSerializer.SerializeRequestCode(payload)));
+
+        return Task.FromResult(new LicenseRequestCodeDto(
+            requestCode,
+            payload.MachineFingerprintHash,
+            payload.ProductName,
+            payload.MachineName,
+            payload.GeneratedAtUtc,
+            "base64(json)",
+            "Send this request code to the vendor to receive a signed offline license file."));
+    }
+
     public async Task<LicenseStatusDto> ImportLicenseAsync(Stream content, CancellationToken cancellationToken = default)
     {
+        using var memoryStream = new MemoryStream();
+        await content.CopyToAsync(memoryStream, cancellationToken);
+        var licenseJson = Encoding.UTF8.GetString(memoryStream.ToArray());
+
+        var status = await EvaluateAsync(licenseJson, persistBinding: false, cancellationToken);
+        if (!status.IsValid)
+        {
+            logger.LogWarning("Rejected license import with status {Status}: {Message}", status.Status, status.Message);
+            return status;
+        }
+
         var licensePath = _options.LicenseFilePath;
         var directory = Path.GetDirectoryName(licensePath);
         if (!string.IsNullOrWhiteSpace(directory))
@@ -29,10 +68,10 @@ public sealed class LicenseStatusService(
             Directory.CreateDirectory(directory);
         }
 
-        await using var fileStream = File.Create(licensePath);
-        await content.CopyToAsync(fileStream, cancellationToken);
-        await fileStream.FlushAsync(cancellationToken);
+        await File.WriteAllTextAsync(licensePath, licenseJson, cancellationToken);
+        await EvaluateAsync(licenseJson, persistBinding: true, cancellationToken);
 
+        logger.LogInformation("Imported valid license file into {LicensePath}.", licensePath);
         return await GetCurrentStatusAsync(cancellationToken);
     }
 
@@ -41,102 +80,173 @@ public sealed class LicenseStatusService(
         var fingerprintHash = machineFingerprintService.GetHashedFingerprint();
         var checkedAtUtc = DateTime.UtcNow;
 
+        if (!File.Exists(_options.LicenseFilePath))
+        {
+            var status = BuildStatus(
+                "MissingLicense",
+                false,
+                fingerprintHash,
+                checkedAtUtc,
+                "No license file has been imported. Generate a machine request code and obtain a signed license from the vendor.",
+                null);
+
+            await PersistBindingAsync(status, null, cancellationToken);
+            LogStatus(status);
+            return status;
+        }
+
+        var json = await File.ReadAllTextAsync(_options.LicenseFilePath, cancellationToken);
+        var evaluated = await EvaluateAsync(json, persistBinding: true, cancellationToken);
+        LogStatus(evaluated);
+        return evaluated;
+    }
+
+    private async Task<LicenseStatusDto> EvaluateAsync(string json, bool persistBinding, CancellationToken cancellationToken)
+    {
+        var fingerprintHash = machineFingerprintService.GetHashedFingerprint();
+        var checkedAtUtc = DateTime.UtcNow;
+        SignedLicenseDocument? document = null;
+        LicenseStatusDto status;
+
         try
         {
-            if (string.IsNullOrWhiteSpace(_options.FingerprintSalt))
-            {
-                return Invalid("ConfigurationError", "Fingerprint salt is missing.", fingerprintHash, checkedAtUtc);
-            }
-
-            if (!File.Exists(_options.LicenseFilePath))
-            {
-                return Invalid("MissingLicense", "License file has not been imported yet.", fingerprintHash, checkedAtUtc);
-            }
-
-            var json = await File.ReadAllTextAsync(_options.LicenseFilePath, cancellationToken);
-            var document = JsonSerializer.Deserialize<SignedLicenseDocument>(json, JsonOptions);
-
+            document = JsonSerializer.Deserialize<SignedLicenseDocument>(json, JsonOptions);
             if (document is null)
             {
-                return Invalid("InvalidLicense", "License file could not be parsed.", fingerprintHash, checkedAtUtc);
+                status = BuildStatus(
+                    "InvalidLicense",
+                    false,
+                    fingerprintHash,
+                    checkedAtUtc,
+                    "License file could not be parsed.",
+                    null);
             }
-
-            if (!string.Equals(document.ProductName, _options.LicensedProductName, StringComparison.OrdinalIgnoreCase))
+            else if (document.Version <= 0)
             {
-                return Invalid("WrongProduct", "License product does not match this application.", fingerprintHash, checkedAtUtc, document);
+                status = BuildStatus(
+                    "InvalidLicense",
+                    false,
+                    fingerprintHash,
+                    checkedAtUtc,
+                    "License file version is invalid.",
+                    document);
             }
-
-            if (!VerifySignature(document))
+            else if (!string.Equals(document.ProductName, _options.LicensedProductName, StringComparison.OrdinalIgnoreCase))
             {
-                return Invalid("InvalidSignature", "License signature verification failed.", fingerprintHash, checkedAtUtc, document);
+                status = BuildStatus(
+                    "WrongProduct",
+                    false,
+                    fingerprintHash,
+                    checkedAtUtc,
+                    "License product does not match this application.",
+                    document);
             }
-
-            if (!string.Equals(document.MachineFingerprintHash, fingerprintHash, StringComparison.OrdinalIgnoreCase))
+            else if (!signatureVerifier.Verify(document))
             {
-                return Invalid("FingerprintMismatch", "License is not bound to this machine fingerprint.", fingerprintHash, checkedAtUtc, document);
+                status = BuildStatus(
+                    "InvalidSignature",
+                    false,
+                    fingerprintHash,
+                    checkedAtUtc,
+                    "License signature verification failed.",
+                    document);
             }
-
-            if (document.ExpiresAtUtc.HasValue && document.ExpiresAtUtc.Value < checkedAtUtc)
+            else if (!string.Equals(document.MachineFingerprintHash, fingerprintHash, StringComparison.OrdinalIgnoreCase))
             {
-                return Invalid("Expired", "License has expired.", fingerprintHash, checkedAtUtc, document);
+                status = BuildStatus(
+                    "FingerprintMismatch",
+                    false,
+                    fingerprintHash,
+                    checkedAtUtc,
+                    "License is bound to another machine fingerprint.",
+                    document);
             }
-
-            return new LicenseStatusDto(
-                "Valid",
-                true,
+            else if (document.ExpiresAtUtc.HasValue && document.ExpiresAtUtc.Value <= checkedAtUtc)
+            {
+                status = BuildStatus(
+                    "Expired",
+                    false,
+                    fingerprintHash,
+                    checkedAtUtc,
+                    "License has expired.",
+                    document);
+            }
+            else
+            {
+                status = BuildStatus(
+                    "Valid",
+                    true,
+                    fingerprintHash,
+                    checkedAtUtc,
+                    "License is valid and activated for this machine.",
+                    document);
+            }
+        }
+        catch (Exception exception)
+        {
+            status = BuildStatus(
+                "InvalidLicense",
+                false,
                 fingerprintHash,
-                document.LicenseId,
-                document.CustomerName,
-                document.IssuedAtUtc,
-                document.ExpiresAtUtc,
-                document.Features,
                 checkedAtUtc,
-                "License is valid.");
+                $"License verification failed: {exception.Message}",
+                document);
         }
-        catch (Exception ex)
+
+        if (persistBinding)
         {
-            return Invalid("Error", $"License verification failed: {ex.Message}", fingerprintHash, checkedAtUtc);
+            await PersistBindingAsync(status, document, cancellationToken);
         }
+
+        return status;
     }
 
-    private static bool VerifySignature(SignedLicenseDocument document)
+    private async Task PersistBindingAsync(LicenseStatusDto status, SignedLicenseDocument? document, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(document.SignatureBase64))
+        var binding = await dbContext.LicenseBindings
+            .OrderByDescending(x => x.LastValidatedAtUtc ?? x.BoundAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (binding is null)
         {
-            return false;
+            binding = new LicenseBinding();
+            dbContext.LicenseBindings.Add(binding);
         }
 
-        var payload = JsonSerializer.Serialize(new
-        {
-            document.LicenseId,
-            document.CustomerName,
-            document.ProductName,
-            document.IssuedAtUtc,
-            document.ExpiresAtUtc,
-            document.MachineFingerprintHash,
-            document.Features
-        }, JsonOptions);
+        binding.LicenseId = document?.LicenseId ?? status.LicenseId ?? "UNLICENSED";
+        binding.CustomerName = document?.CustomerName ?? status.CustomerName ?? "Unlicensed";
+        binding.MachineFingerprintHash = status.FingerprintHash;
+        binding.BindingStatus = status.Status;
+        binding.BoundAtUtc = document?.BoundAtUtc == default ? DateTime.UtcNow : document?.BoundAtUtc ?? DateTime.UtcNow;
+        binding.ExpiresAtUtc = status.ExpiresAtUtc;
+        binding.LastValidatedAtUtc = status.CheckedAtUtc;
+        binding.FeaturesJson = JsonSerializer.Serialize(status.Features, JsonOptions);
 
-        using var rsa = RSA.Create();
-        rsa.FromXmlString(EmbeddedLicenseKeyProvider.PublicKeyXml);
-        var signature = Convert.FromBase64String(document.SignatureBase64);
-        return rsa.VerifyData(
-            Encoding.UTF8.GetBytes(payload),
-            signature,
-            HashAlgorithmName.SHA256,
-            RSASignaturePadding.Pkcs1);
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    private static LicenseStatusDto Invalid(
+    private void LogStatus(LicenseStatusDto status)
+    {
+        if (status.IsValid)
+        {
+            logger.LogInformation("License validation succeeded. Status {Status}. License {LicenseId}.", status.Status, status.LicenseId);
+            return;
+        }
+
+        logger.LogWarning("License validation failed. Status {Status}. Message: {Message}", status.Status, status.Message);
+    }
+
+    private static LicenseStatusDto BuildStatus(
         string status,
-        string message,
+        bool isValid,
         string fingerprintHash,
         DateTime checkedAtUtc,
-        SignedLicenseDocument? document = null)
+        string message,
+        SignedLicenseDocument? document)
     {
         return new LicenseStatusDto(
             status,
-            false,
+            isValid,
             fingerprintHash,
             document?.LicenseId,
             document?.CustomerName,
@@ -144,6 +254,7 @@ public sealed class LicenseStatusService(
             document?.ExpiresAtUtc,
             document?.Features?.ToArray() ?? Array.Empty<string>(),
             checkedAtUtc,
-            message);
+            message,
+            !isValid);
     }
 }

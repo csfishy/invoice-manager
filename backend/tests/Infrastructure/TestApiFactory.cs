@@ -37,6 +37,7 @@ public sealed class TestApiFactory : WebApplicationFactory<Program>, IAsyncLifet
         SetEnvironmentVariable("Licensing__LicenseFilePath", _licensePath);
         SetEnvironmentVariable("Licensing__FingerprintSalt", "integration-test-salt");
         SetEnvironmentVariable("Licensing__LicensedProductName", "Invoice Manager");
+        SetEnvironmentVariable("Licensing__AllowUnlicensedDevelopmentMode", Environment.GetEnvironmentVariable("Licensing__AllowUnlicensedDevelopmentMode") ?? "true");
         SetEnvironmentVariable("Cors__AllowedOrigins", "http://localhost:3000");
 
         return Task.CompletedTask;

@@ -135,11 +135,22 @@ export type LicenseStatus = {
   features: string[];
   checkedAtUtc: string;
   message: string;
+  requiresActivation: boolean;
 };
 
 export type LicenseFingerprint = {
   fingerprintHash: string;
   generatedAtUtc: string;
+};
+
+export type LicenseRequestCode = {
+  requestCode: string;
+  fingerprintHash: string;
+  productName: string;
+  machineName: string;
+  generatedAtUtc: string;
+  format: string;
+  message: string;
 };
 
 export type BillFormValues = {

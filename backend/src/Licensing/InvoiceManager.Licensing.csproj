@@ -10,6 +10,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="System.Management" Version="9.0.4" />
     <ProjectReference Include="..\Application\InvoiceManager.Application.csproj" />
+    <ProjectReference Include="..\Infrastructure\InvoiceManager.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

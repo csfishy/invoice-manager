@@ -10,4 +10,5 @@ public sealed record LicenseStatusDto(
     DateTime? ExpiresAtUtc,
     IReadOnlyCollection<string> Features,
     DateTime CheckedAtUtc,
-    string Message);
+    string Message,
+    bool RequiresActivation);
