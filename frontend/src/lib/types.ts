@@ -42,8 +42,10 @@ export type BillListItem = {
 export type BillAttachment = {
   id: string;
   originalFileName: string;
+  fileExtension: string;
   contentType: string;
   fileSize: number;
+  isPreviewable: boolean;
   uploadedAtUtc: string;
 };
 

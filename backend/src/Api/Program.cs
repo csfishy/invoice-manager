@@ -109,18 +109,34 @@ app.MapGet("/api/dashboard/summary", async (IDashboardService dashboardService, 
 app.MapGet("/api/bills", async (
     BillType? billType,
     PaymentStatus? paymentStatus,
+    DateOnly? issueDateFrom,
+    DateOnly? issueDateTo,
     DateOnly? dueDateFrom,
     DateOnly? dueDateTo,
     DateOnly? periodFrom,
     DateOnly? periodTo,
     string? customer,
     string? keyword,
+    bool? hasAttachment,
     int? page,
     int? pageSize,
     IBillService billService,
     CancellationToken cancellationToken) =>
 {
-    var query = new BillQueryDto(billType, paymentStatus, dueDateFrom, dueDateTo, periodFrom, periodTo, customer, keyword, page ?? 1, pageSize ?? 20);
+    var query = new BillQueryDto(
+        billType,
+        paymentStatus,
+        issueDateFrom,
+        issueDateTo,
+        dueDateFrom,
+        dueDateTo,
+        periodFrom,
+        periodTo,
+        customer,
+        keyword,
+        hasAttachment,
+        page ?? 1,
+        pageSize ?? 20);
     return Results.Ok(await billService.GetBillsAsync(query, cancellationToken));
 }).RequireAuthorization("Authenticated");
 
@@ -270,6 +286,7 @@ app.MapPost("/api/bills/{billId:guid}/attachments", async (
     HttpRequest request,
     ClaimsPrincipal user,
     IBillService billService,
+    IFileStorageService fileStorageService,
     CancellationToken cancellationToken) =>
 {
     var form = await request.ReadFormAsync(cancellationToken);
@@ -277,6 +294,22 @@ app.MapPost("/api/bills/{billId:guid}/attachments", async (
     if (file is null || file.Length <= 0)
     {
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = ["A file is required."] });
+    }
+
+    if (!fileStorageService.IsSupportedExtension(file.FileName))
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["file"] = ["Only PDF and common image formats are supported."]
+        });
+    }
+
+    if (file.Length > fileStorageService.GetMaxFileSizeBytes())
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["file"] = [$"File size exceeds the {fileStorageService.GetMaxFileSizeBytes() / (1024 * 1024)} MB limit."]
+        });
     }
 
     await using var stream = file.OpenReadStream();
@@ -291,6 +324,12 @@ app.MapPost("/api/bills/{billId:guid}/attachments", async (
 
     return attachment is null ? Results.NotFound() : Results.Ok(attachment);
 }).RequireAuthorization("OperatorAccess");
+
+app.MapGet("/api/attachments/{attachmentId:guid}/metadata", async (Guid attachmentId, IBillService billService, CancellationToken cancellationToken) =>
+{
+    var metadata = await billService.GetAttachmentAsync(attachmentId, cancellationToken);
+    return metadata is null ? Results.NotFound() : Results.Ok(metadata);
+}).RequireAuthorization("Authenticated");
 
 app.MapGet("/api/attachments/{attachmentId:guid}", async (Guid attachmentId, IBillService billService, CancellationToken cancellationToken) =>
 {

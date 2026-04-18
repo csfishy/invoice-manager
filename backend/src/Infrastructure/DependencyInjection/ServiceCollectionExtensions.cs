@@ -28,6 +28,12 @@ public static class ServiceCollectionExtensions
             .Validate(x => !string.IsNullOrWhiteSpace(x.Path), "Uploads path is required.")
             .ValidateOnStart();
 
+        services.AddOptions<AttachmentOptions>()
+            .Bind(configuration.GetSection(AttachmentOptions.SectionName))
+            .Validate(x => x.MaxFileSizeBytes > 0, "Attachment max file size must be greater than zero.")
+            .Validate(x => !string.IsNullOrWhiteSpace(x.AllowedExtensions), "Allowed attachment extensions are required.")
+            .ValidateOnStart();
+
         services.AddOptions<CorsOptions>()
             .Bind(configuration.GetSection(CorsOptions.SectionName));
 

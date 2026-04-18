@@ -4,9 +4,16 @@ using Microsoft.Extensions.Options;
 
 namespace InvoiceManager.Infrastructure.Services;
 
-public sealed class FileStorageService(IOptions<StorageOptions> options) : IFileStorageService
+public sealed class FileStorageService(
+    IOptions<StorageOptions> options,
+    IOptions<AttachmentOptions> attachmentOptions) : IFileStorageService
 {
     private readonly string _rootPath = options.Value.Path;
+    private readonly AttachmentOptions _attachmentOptions = attachmentOptions.Value;
+    private readonly HashSet<string> _allowedExtensions = attachmentOptions.Value.AllowedExtensions
+        .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+        .Select(extension => extension.StartsWith('.') ? extension.ToLowerInvariant() : $".{extension.ToLowerInvariant()}")
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     public async Task<string> SaveAsync(string originalFileName, Stream content, CancellationToken cancellationToken = default)
     {
@@ -44,4 +51,12 @@ public sealed class FileStorageService(IOptions<StorageOptions> options) : IFile
 
         return Task.CompletedTask;
     }
+
+    public bool IsSupportedExtension(string originalFileName)
+    {
+        var extension = Path.GetExtension(originalFileName);
+        return !string.IsNullOrWhiteSpace(extension) && _allowedExtensions.Contains(extension);
+    }
+
+    public long GetMaxFileSizeBytes() => _attachmentOptions.MaxFileSizeBytes;
 }

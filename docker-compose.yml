@@ -29,6 +29,8 @@ services:
       Database__Provider: ${DATABASE_PROVIDER}
       ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       Uploads__Path: ${UPLOADS_PATH}
+      Attachments__MaxFileSizeBytes: ${ATTACHMENTS_MAX_FILE_SIZE_BYTES}
+      Attachments__AllowedExtensions: ${ATTACHMENTS_ALLOWED_EXTENSIONS}
       Licensing__LicenseFilePath: ${LICENSE_FILE_PATH}
       Licensing__FingerprintSalt: ${LICENSE_FINGERPRINT_SALT}
       Licensing__LicensedProductName: ${LICENSED_PRODUCT_NAME}

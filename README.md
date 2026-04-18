@@ -8,7 +8,8 @@ Self-hosted bill management system for customer-operated Windows environments.
 - bill CRUD for water, electricity, gas, and tax bills
 - bill category management for Admin users
 - attachment upload and download for bill files
-- search and filtering by bill type, payment status, due date, billing period, customer, and keyword
+- attachment validation for PDF and common image formats stored on mounted volume paths
+- search and filtering by bill type, payment status, issue date, due date, billing period, customer, keyword, and attachment presence
 - dashboard summary with totals, by-type metrics, and upcoming due bills
 - audit log tracking for important actions
 - offline-first machine-bound licensing status and license import

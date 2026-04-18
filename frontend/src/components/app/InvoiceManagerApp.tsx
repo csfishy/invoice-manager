@@ -28,17 +28,22 @@ type View = "dashboard" | "bills" | "categories" | "audit" | "license";
 type BillFilters = {
   billType: string;
   paymentStatus: string;
+  issueDateFrom: string;
+  issueDateTo: string;
   dueDateFrom: string;
   dueDateTo: string;
   periodFrom: string;
   periodTo: string;
   customer: string;
   keyword: string;
+  hasAttachment: string;
   page: number;
 };
 
 const billTypes: BillType[] = ["Water", "Electricity", "Gas", "Tax"];
 const paymentStatuses: PaymentStatus[] = ["Pending", "Paid", "Overdue"];
+const attachmentAccept = ".pdf,.png,.jpg,.jpeg,.gif,.bmp,.webp,.tif,.tiff";
+const maxAttachmentBytes = 10 * 1024 * 1024;
 
 const emptyBillForm: BillFormValues = {
   type: "Water",
@@ -72,12 +77,15 @@ const emptyCategoryForm: CategoryFormValues = {
 const emptyFilters: BillFilters = {
   billType: "",
   paymentStatus: "",
+  issueDateFrom: "",
+  issueDateTo: "",
   dueDateFrom: "",
   dueDateTo: "",
   periodFrom: "",
   periodTo: "",
   customer: "",
   keyword: "",
+  hasAttachment: "",
   page: 1,
 };
 
@@ -271,12 +279,15 @@ export function InvoiceManagerApp() {
     const query = new URLSearchParams();
     if (activeFilters.billType) query.set("billType", activeFilters.billType);
     if (activeFilters.paymentStatus) query.set("paymentStatus", activeFilters.paymentStatus);
+    if (activeFilters.issueDateFrom) query.set("issueDateFrom", activeFilters.issueDateFrom);
+    if (activeFilters.issueDateTo) query.set("issueDateTo", activeFilters.issueDateTo);
     if (activeFilters.dueDateFrom) query.set("dueDateFrom", activeFilters.dueDateFrom);
     if (activeFilters.dueDateTo) query.set("dueDateTo", activeFilters.dueDateTo);
     if (activeFilters.periodFrom) query.set("periodFrom", activeFilters.periodFrom);
     if (activeFilters.periodTo) query.set("periodTo", activeFilters.periodTo);
     if (activeFilters.customer) query.set("customer", activeFilters.customer);
     if (activeFilters.keyword) query.set("keyword", activeFilters.keyword);
+    if (activeFilters.hasAttachment) query.set("hasAttachment", activeFilters.hasAttachment);
     query.set("page", String(page));
     query.set("pageSize", "12");
 
@@ -443,6 +454,18 @@ export function InvoiceManagerApp() {
 
   async function uploadAttachment(file: File) {
     if (!token || !selectedBill) {
+      return;
+    }
+
+    const normalizedName = file.name.toLowerCase();
+    const isSupported = attachmentAccept.split(",").some((extension) => normalizedName.endsWith(extension));
+    if (!isSupported) {
+      setMessage("Only PDF and common image formats are supported.");
+      return;
+    }
+
+    if (file.size > maxAttachmentBytes) {
+      setMessage("File size exceeds the 10 MB limit.");
       return;
     }
 
@@ -800,6 +823,26 @@ export function InvoiceManagerApp() {
                 />
               </Field>
 
+              <Field label="Issue Date From">
+                <TextInput
+                  type="date"
+                  value={filters.issueDateFrom}
+                  onChange={(event) =>
+                    setFilters((previous) => ({ ...previous, issueDateFrom: event.target.value }))
+                  }
+                />
+              </Field>
+
+              <Field label="Issue Date To">
+                <TextInput
+                  type="date"
+                  value={filters.issueDateTo}
+                  onChange={(event) =>
+                    setFilters((previous) => ({ ...previous, issueDateTo: event.target.value }))
+                  }
+                />
+              </Field>
+
               <Field label="Due Date From">
                 <TextInput
                   type="date"
@@ -832,6 +875,20 @@ export function InvoiceManagerApp() {
                   value={filters.periodTo}
                   onChange={(event) => setFilters((previous) => ({ ...previous, periodTo: event.target.value }))}
                 />
+              </Field>
+
+              <Field label="Has Attachment">
+                <select
+                  className="input"
+                  value={filters.hasAttachment}
+                  onChange={(event) =>
+                    setFilters((previous) => ({ ...previous, hasAttachment: event.target.value }))
+                  }
+                >
+                  <option value="">All</option>
+                  <option value="true">With Attachments</option>
+                  <option value="false">Without Attachments</option>
+                </select>
               </Field>
             </div>
           </Panel>
@@ -1156,6 +1213,7 @@ export function InvoiceManagerApp() {
                       <input
                         type="file"
                         hidden
+                        accept={attachmentAccept}
                         onChange={(event) => {
                           const file = event.target.files?.[0];
                           if (file) {
@@ -1178,7 +1236,11 @@ export function InvoiceManagerApp() {
                         <div>
                           <strong>{attachment.originalFileName}</strong>
                           <span>
-                            {attachment.contentType} | {Math.max(1, Math.round(attachment.fileSize / 1024))} KB
+                            {attachment.fileExtension} | {attachment.contentType} | {Math.max(1, Math.round(attachment.fileSize / 1024))} KB
+                          </span>
+                          <span>
+                            {attachment.isPreviewable ? "Preview available" : "Download only"} | uploaded{" "}
+                            {new Date(attachment.uploadedAtUtc).toLocaleString()}
                           </span>
                         </div>
                         <div className="toolbar">

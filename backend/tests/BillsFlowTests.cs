@@ -68,7 +68,7 @@ public sealed class BillsFlowTests(TestApiFactory factory) : IClassFixture<TestA
         Assert.NotNull(created);
 
         using var formData = new MultipartFormDataContent();
-        formData.Add(new ByteArrayContent(Encoding.UTF8.GetBytes("sample file")), "file", "sample.txt");
+        formData.Add(new ByteArrayContent(Encoding.UTF8.GetBytes("sample pdf content")), "file", "sample.pdf");
 
         var uploadResponse = await _client.PostAsync($"/api/bills/{created!.Id}/attachments", formData);
         uploadResponse.EnsureSuccessStatusCode();
@@ -76,6 +76,12 @@ public sealed class BillsFlowTests(TestApiFactory factory) : IClassFixture<TestA
         var detail = await _client.GetFromJsonAsync<BillDetailDto>($"/api/bills/{created.Id}", TestJson.Options);
         Assert.NotNull(detail);
         Assert.Single(detail!.Attachments);
+        Assert.Equal(".pdf", detail.Attachments.Single().FileExtension);
+        Assert.True(detail.Attachments.Single().IsPreviewable);
+
+        var metadata = await _client.GetFromJsonAsync<BillAttachmentDto>($"/api/attachments/{detail.Attachments.Single().Id}/metadata", TestJson.Options);
+        Assert.NotNull(metadata);
+        Assert.Equal("sample.pdf", metadata!.OriginalFileName);
 
         var audit = await _client.GetFromJsonAsync<PagedResult<AuditLogDto>>("/api/audit-logs", TestJson.Options);
         Assert.NotNull(audit);
@@ -143,6 +149,41 @@ public sealed class BillsFlowTests(TestApiFactory factory) : IClassFixture<TestA
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
+    [Fact]
+    public async Task UploadingUnsupportedAttachment_ReturnsValidationProblem()
+    {
+        await AuthorizeAsync();
+        var billId = await GetFirstBillIdAsync();
+
+        using var formData = new MultipartFormDataContent();
+        formData.Add(new ByteArrayContent(Encoding.UTF8.GetBytes("not allowed")), "file", "blocked.txt");
+
+        var response = await _client.PostAsync($"/api/bills/{billId}/attachments", formData);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task BillsEndpoint_CanFilterByAttachmentPresence()
+    {
+        await AuthorizeAsync();
+        var billId = await GetFirstBillIdAsync();
+
+        using var formData = new MultipartFormDataContent();
+        formData.Add(new ByteArrayContent(Encoding.UTF8.GetBytes("image-bytes")), "file", "preview.png");
+
+        var uploadResponse = await _client.PostAsync($"/api/bills/{billId}/attachments", formData);
+        uploadResponse.EnsureSuccessStatusCode();
+
+        var withAttachments = await _client.GetFromJsonAsync<PagedResult<BillListItemDto>>("/api/bills?hasAttachment=true", TestJson.Options);
+        var withoutAttachments = await _client.GetFromJsonAsync<PagedResult<BillListItemDto>>("/api/bills?hasAttachment=false", TestJson.Options);
+
+        Assert.NotNull(withAttachments);
+        Assert.Contains(withAttachments!.Items, bill => bill.Id == billId && bill.AttachmentCount > 0);
+        Assert.NotNull(withoutAttachments);
+        Assert.DoesNotContain(withoutAttachments!.Items, bill => bill.Id == billId);
+    }
+
     private async Task AuthorizeAsync()
     {
         var auth = await TestAuthHelper.LoginAsAdminAsync(_client);
@@ -154,5 +195,11 @@ public sealed class BillsFlowTests(TestApiFactory factory) : IClassFixture<TestA
         var categories = await _client.GetFromJsonAsync<IReadOnlyCollection<BillCategoryDto>>("/api/categories?includeInactive=true", TestJson.Options);
         var category = categories?.FirstOrDefault(x => x.Type.ToString() == type && x.IsActive);
         return category?.Id ?? throw new InvalidOperationException($"Missing category for {type}.");
+    }
+
+    private async Task<Guid> GetFirstBillIdAsync()
+    {
+        var payload = await _client.GetFromJsonAsync<PagedResult<BillListItemDto>>("/api/bills", TestJson.Options);
+        return payload?.Items.First().Id ?? throw new InvalidOperationException("Missing seeded bills.");
     }
 }

@@ -184,6 +184,16 @@ public sealed class BillService(
             billQuery = billQuery.Where(x => x.PaymentStatus == query.PaymentStatus.Value);
         }
 
+        if (query.IssueDateFrom.HasValue)
+        {
+            billQuery = billQuery.Where(x => x.IssueDate >= query.IssueDateFrom.Value);
+        }
+
+        if (query.IssueDateTo.HasValue)
+        {
+            billQuery = billQuery.Where(x => x.IssueDate <= query.IssueDateTo.Value);
+        }
+
         if (query.DueDateFrom.HasValue)
         {
             billQuery = billQuery.Where(x => x.DueDate >= query.DueDateFrom.Value);
@@ -213,10 +223,19 @@ public sealed class BillService(
         {
             billQuery = billQuery.Where(x =>
                 x.ReferenceNumber.ToLower().Contains(normalizedKeyword) ||
+                x.CustomerName.ToLower().Contains(normalizedKeyword) ||
+                x.PropertyName.ToLower().Contains(normalizedKeyword) ||
                 x.ProviderName.ToLower().Contains(normalizedKeyword) ||
                 x.AccountNumber.ToLower().Contains(normalizedKeyword) ||
                 x.Keywords.ToLower().Contains(normalizedKeyword) ||
                 x.Notes.ToLower().Contains(normalizedKeyword));
+        }
+
+        if (query.HasAttachment.HasValue)
+        {
+            billQuery = query.HasAttachment.Value
+                ? billQuery.Where(x => x.Attachments.Any())
+                : billQuery.Where(x => !x.Attachments.Any());
         }
 
         var page = Math.Max(query.Page, 1);
@@ -412,7 +431,7 @@ public sealed class BillService(
             BillId = billId,
             OriginalFileName = originalFileName,
             StoredFileName = storedFileName,
-            ContentType = string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType,
+            ContentType = ResolveContentType(originalFileName, contentType),
             FileSize = fileSize,
             UploadedByUserId = actingUserId
         };
@@ -432,12 +451,7 @@ public sealed class BillService(
             new { billId, attachment.OriginalFileName, attachment.FileSize },
             cancellationToken);
 
-        return new BillAttachmentDto(
-            attachment.Id,
-            attachment.OriginalFileName,
-            attachment.ContentType,
-            attachment.FileSize,
-            attachment.UploadedAtUtc);
+        return MapAttachment(attachment);
     }
 
     public async Task<Stream?> OpenAttachmentAsync(Guid attachmentId, CancellationToken cancellationToken = default)
@@ -453,11 +467,12 @@ public sealed class BillService(
 
     public async Task<BillAttachmentDto?> GetAttachmentAsync(Guid attachmentId, CancellationToken cancellationToken = default)
     {
-        return await dbContext.BillFiles
+        var attachment = await dbContext.BillFiles
             .AsNoTracking()
             .Where(x => x.Id == attachmentId)
-            .Select(x => new BillAttachmentDto(x.Id, x.OriginalFileName, x.ContentType, x.FileSize, x.UploadedAtUtc))
             .FirstOrDefaultAsync(cancellationToken);
+
+        return attachment is null ? null : MapAttachment(attachment);
     }
 
     public async Task<bool> DeleteAttachmentAsync(Guid attachmentId, Guid actingUserId, string actingUsername, CancellationToken cancellationToken = default)
@@ -511,7 +526,7 @@ public sealed class BillService(
             bill.UpdatedAtUtc,
             bill.Attachments
                 .OrderByDescending(x => x.UploadedAtUtc)
-                .Select(x => new BillAttachmentDto(x.Id, x.OriginalFileName, x.ContentType, x.FileSize, x.UploadedAtUtc))
+                .Select(MapAttachment)
                 .ToList());
     }
 
@@ -552,5 +567,42 @@ public sealed class BillService(
             category.IsSystemDefault,
             category.CreatedAtUtc,
             billCount);
+    }
+
+    private static BillAttachmentDto MapAttachment(BillAttachment attachment)
+    {
+        return new BillAttachmentDto(
+            attachment.Id,
+            attachment.OriginalFileName,
+            Path.GetExtension(attachment.OriginalFileName).ToLowerInvariant(),
+            attachment.ContentType,
+            attachment.FileSize,
+            IsPreviewable(attachment.ContentType),
+            attachment.UploadedAtUtc);
+    }
+
+    private static bool IsPreviewable(string contentType)
+        => contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(contentType, "application/pdf", StringComparison.OrdinalIgnoreCase);
+
+    private static string ResolveContentType(string originalFileName, string? contentType)
+    {
+        if (!string.IsNullOrWhiteSpace(contentType) &&
+            !string.Equals(contentType, "application/octet-stream", StringComparison.OrdinalIgnoreCase))
+        {
+            return contentType;
+        }
+
+        return Path.GetExtension(originalFileName).ToLowerInvariant() switch
+        {
+            ".pdf" => "application/pdf",
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".bmp" => "image/bmp",
+            ".webp" => "image/webp",
+            ".tif" or ".tiff" => "image/tiff",
+            _ => "application/octet-stream"
+        };
     }
 }

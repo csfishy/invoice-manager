@@ -49,8 +49,10 @@ public sealed record BillDetailDto(
 public sealed record BillAttachmentDto(
     Guid Id,
     string OriginalFileName,
+    string FileExtension,
     string ContentType,
     long FileSize,
+    bool IsPreviewable,
     DateTime UploadedAtUtc);
 
 public sealed record CreateBillRequestDto(
@@ -94,12 +96,15 @@ public sealed record UpdateBillRequestDto(
 public sealed record BillQueryDto(
     BillType? BillType,
     PaymentStatus? PaymentStatus,
+    DateOnly? IssueDateFrom,
+    DateOnly? IssueDateTo,
     DateOnly? DueDateFrom,
     DateOnly? DueDateTo,
     DateOnly? PeriodFrom,
     DateOnly? PeriodTo,
     string? Customer,
     string? Keyword,
+    bool? HasAttachment,
     int Page = 1,
     int PageSize = 20);
 
