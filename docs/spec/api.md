@@ -1,9 +1,5 @@
 # API Specification
 
-## Purpose
-
-Define the initial backend API surface for the admin frontend and customer deployment workflows.
-
 ## Base Path
 
 `/api`
@@ -11,17 +7,11 @@ Define the initial backend API surface for the admin frontend and customer deplo
 ## Authentication
 
 - `POST /api/auth/login`
-- `POST /api/auth/refresh`
-- `POST /api/auth/logout`
+- `GET /api/me`
 
-## Users and Roles
+## Dashboard
 
-- `GET /api/users`
-- `POST /api/users`
-- `GET /api/users/{id}`
-- `PUT /api/users/{id}`
-- `PATCH /api/users/{id}/roles`
-- `GET /api/roles`
+- `GET /api/dashboard/summary`
 
 ## Bills
 
@@ -37,25 +27,21 @@ Define the initial backend API surface for the admin frontend and customer deplo
 - status
 - issue date range
 - due date range
+- billing period range
 - account number
-- vendor or authority name
+- provider or authority name
+- customer name
 - free-text search
 
 ## Attachments
 
 - `POST /api/bills/{id}/attachments`
-- `GET /api/bills/{id}/attachments`
 - `GET /api/attachments/{attachmentId}`
 - `DELETE /api/attachments/{attachmentId}`
 
 ## Audit Logs
 
-- `GET /api/audit-logs`
-- `GET /api/audit-logs/{id}`
-
-## Export
-
-- `POST /api/exports/bills`
+- `GET /api/audit-logs?page=1&pageSize=20`
 
 ## Licensing
 

@@ -26,16 +26,19 @@ services:
       - .env
     environment:
       ASPNETCORE_URLS: http://+:8080
+      Database__Provider: ${DATABASE_PROVIDER}
       ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       Uploads__Path: ${UPLOADS_PATH}
-      Licensing__PublicKeyPath: ${LICENSE_PUBLIC_KEY_PATH}
       Licensing__LicenseFilePath: ${LICENSE_FILE_PATH}
       Licensing__FingerprintSalt: ${LICENSE_FINGERPRINT_SALT}
+      Licensing__LicensedProductName: ${LICENSED_PRODUCT_NAME}
       Jwt__Issuer: ${JWT_ISSUER}
       Jwt__Audience: ${JWT_AUDIENCE}
       Jwt__SigningKey: ${JWT_SIGNING_KEY}
+      Jwt__LifetimeMinutes: ${JWT_LIFETIME_MINUTES}
       Seed__DefaultAdminUsername: ${DEFAULT_ADMIN_USERNAME}
       Seed__DefaultAdminPassword: ${DEFAULT_ADMIN_PASSWORD}
+      Cors__AllowedOrigins: ${CORS_ALLOWED_ORIGINS}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:
@@ -55,4 +58,3 @@ services:
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL}
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
-

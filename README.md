@@ -1,58 +1,73 @@
 # Invoice Manager
 
-Self-hosted bill management system scaffold for customer deployment on Windows environments.
+Self-hosted bill management system for customer-operated Windows environments.
 
-## Goal
+## Included Capabilities
 
-This repository provides the initial project structure for a utility and tax bill management platform with:
+- login with role-based access for `Admin`, `Operator`, and `Viewer`
+- bill CRUD for water, electricity, gas, and tax bills
+- bill category management for Admin users
+- attachment upload and download for bill files
+- search and filtering by bill type, payment status, due date, billing period, customer, and keyword
+- dashboard summary with totals, by-type metrics, and upcoming due bills
+- audit log tracking for important actions
+- offline-first machine-bound licensing status and license import
+- Docker Compose deployment with Windows helper scripts
 
-- bill management for water, electricity, gas, and tax bills
-- offline machine-bound licensing
-- clear frontend and backend separation
-- customer self-hosted deployment with Docker Compose
-- Windows operational scripts for install, start, stop, backup, restore, update, and license import
-
-## Planned Stack
+## Tech Stack
 
 - Frontend: Next.js + TypeScript
 - Backend: ASP.NET Core Web API
 - Database: PostgreSQL
 - Deployment: Docker Compose
-- Host environment: Windows customer machines or servers
 
-## Repository Structure
+## Current Architecture
+
+- [frontend](/D:/Users/csfishy/Documents/GitHub/invoice-manager/frontend) contains the admin UI
+- [backend/src/Api](/D:/Users/csfishy/Documents/GitHub/invoice-manager/backend/src/Api) hosts the Web API
+- [backend/src/Application](/D:/Users/csfishy/Documents/GitHub/invoice-manager/backend/src/Application) contains DTOs and service contracts
+- [backend/src/Domain](/D:/Users/csfishy/Documents/GitHub/invoice-manager/backend/src/Domain) contains core entities and enums
+- [backend/src/Infrastructure](/D:/Users/csfishy/Documents/GitHub/invoice-manager/backend/src/Infrastructure) contains EF Core, auth, storage, seed data, and migrations
+- [backend/src/Licensing](/D:/Users/csfishy/Documents/GitHub/invoice-manager/backend/src/Licensing) contains machine fingerprinting and offline license validation
+
+## Monorepo Structure
 
 ```text
 invoice-manager/
-  AGENTS.md
-  README.md
-  .env.example
-  docker-compose.yml
   frontend/
   backend/
-  deployment/windows/
-  docs/spec/
+  deployment/
+  docs/
 ```
 
-## What Is Included
-
-- root environment template
-- Docker Compose definition for frontend, backend, and PostgreSQL
-- frontend and backend starter folders
-- Windows deployment and operations scripts
-- product, architecture, API, licensing, and deployment specifications
-
-## What Is Not Implemented Yet
-
-This scaffold does not yet include the full Next.js application or ASP.NET Core source implementation. It establishes the repo layout, operational scripts, and technical planning documents so development can begin on a clean structure.
-
-## Quick Start
+## Local Setup
 
 1. Copy `.env.example` to `.env`.
-2. Adjust ports, secrets, and storage values for the customer environment.
-3. Review the docs in [docs/spec](/D:/Users/csfishy/Documents/GitHub/invoice-manager/docs/spec).
-4. Add the frontend and backend application code into `frontend/` and `backend/src/`.
-5. Use the Windows scripts in [deployment/windows](/D:/Users/csfishy/Documents/GitHub/invoice-manager/deployment/windows) for local operations.
+2. Update secrets, ports, and storage values.
+3. Restore the local EF tool with `dotnet tool restore` in [backend](/D:/Users/csfishy/Documents/GitHub/invoice-manager/backend) if you need to manage migrations manually.
+4. Run [deployment/windows/install.bat](/D:/Users/csfishy/Documents/GitHub/invoice-manager/deployment/windows/install.bat) on Windows, or run `docker compose up -d --build`.
+5. Open `http://localhost:3000`.
+6. Sign in with the seeded admin account from `.env`.
+7. Import a license file from the Licensing screen if you have one.
+
+## Development Defaults
+
+- Admin username: value from `DEFAULT_ADMIN_USERNAME`
+- Admin password: value from `DEFAULT_ADMIN_PASSWORD`
+- Seeded secondary users:
+  - `operator` / `operator123!`
+  - `viewer` / `viewer123!`
+
+## Validation
+
+- `dotnet test backend/tests/InvoiceManager.Api.Tests.csproj`
+- `dotnet run --project backend/src/Api/InvoiceManager.Api.csproj`
+- `npm.cmd install && npm.cmd run dev` in [frontend](/D:/Users/csfishy/Documents/GitHub/invoice-manager/frontend)
+- `npm.cmd run build` in [frontend](/D:/Users/csfishy/Documents/GitHub/invoice-manager/frontend)
+
+## Licensing Note
+
+The application validates license files using an embedded sample public key. For a real customer release, replace the embedded public key in [EmbeddedLicenseKeyProvider.cs](/D:/Users/csfishy/Documents/GitHub/invoice-manager/backend/src/Licensing/Services/EmbeddedLicenseKeyProvider.cs) with your production public key and keep the corresponding private signing key outside the application.
 
 ## Key Docs
 
@@ -61,11 +76,3 @@ This scaffold does not yet include the full Next.js application or ASP.NET Core 
 - [API](/D:/Users/csfishy/Documents/GitHub/invoice-manager/docs/spec/api.md)
 - [Licensing](/D:/Users/csfishy/Documents/GitHub/invoice-manager/docs/spec/licensing.md)
 - [Deployment](/D:/Users/csfishy/Documents/GitHub/invoice-manager/docs/spec/deployment.md)
-
-## Next Recommended Steps
-
-- scaffold the Next.js admin frontend
-- scaffold the ASP.NET Core Web API solution with layered projects
-- implement authentication, RBAC, audit logging, and bill CRUD
-- implement offline license verification using an embedded public key
-- add tests for API flows, license validation, and startup failure conditions

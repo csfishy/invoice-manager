@@ -21,6 +21,7 @@ Customer self-hosted deployment on a Windows environment.
 
 - `docker-compose.yml`
 - `.env`
+- `backend/dotnet-tools.json`
 - `deployment/windows/install.bat`
 - `deployment/windows/start.bat`
 - `deployment/windows/stop.bat`
@@ -37,8 +38,9 @@ Customer self-hosted deployment on a Windows environment.
 4. Update environment variables, secrets, ports, and storage settings.
 5. Run `deployment\windows\install.bat`.
 6. Open the local frontend URL in the browser.
-7. Import the customer license file.
-8. Verify the license status from the admin page.
+7. Sign in with the seeded admin credentials.
+8. Import the customer license file.
+9. Verify the license status from the admin page.
 
 ## Backup Scope
 

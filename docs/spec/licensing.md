@@ -54,6 +54,13 @@ Recommended license payload fields:
 - License validation must work without internet access.
 - Admins must be able to inspect license status from the UI.
 - Invalid license state should be visible during startup and health checks.
+- The application must verify signatures using the embedded public key only.
+
+## Current Implementation Notes
+
+- The repository includes an embedded sample RSA public key for development and packaging rehearsal.
+- Real customer deployment should replace the embedded sample key with the production public key before shipping.
+- License import writes the signed license file to the configured application data path and re-validates it immediately.
 
 ## Suggested Admin UI Fields
 

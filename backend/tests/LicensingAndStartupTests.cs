@@ -1,0 +1,80 @@
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using InvoiceManager.Application.Licensing;
+using InvoiceManager.Tests.Infrastructure;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
+using Xunit;
+
+namespace InvoiceManager.Tests;
+
+public sealed class LicensingAndStartupTests(TestApiFactory factory) : IClassFixture<TestApiFactory>
+{
+    private readonly HttpClient _client = factory.CreateClient();
+
+    [Fact]
+    public async Task LicenseStatus_WhenNoLicenseImported_IsMissingLicense()
+    {
+        var auth = await TestAuthHelper.LoginAsAdminAsync(_client);
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", auth.AccessToken);
+
+        var payload = await _client.GetFromJsonAsync<LicenseStatusDto>("/api/license/status", TestJson.Options);
+
+        Assert.NotNull(payload);
+        Assert.False(payload!.IsValid);
+        Assert.Equal("MissingLicense", payload.Status);
+        Assert.False(string.IsNullOrWhiteSpace(payload.FingerprintHash));
+    }
+
+    [Fact]
+    public async Task StartupFails_WhenJwtSigningKeyIsMissing()
+    {
+        var previousProvider = Environment.GetEnvironmentVariable("Database__Provider");
+        var previousConnection = Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection");
+        var previousIssuer = Environment.GetEnvironmentVariable("Jwt__Issuer");
+        var previousAudience = Environment.GetEnvironmentVariable("Jwt__Audience");
+        var previousSigningKey = Environment.GetEnvironmentVariable("Jwt__SigningKey");
+        var previousUploads = Environment.GetEnvironmentVariable("Uploads__Path");
+        var previousLicensePath = Environment.GetEnvironmentVariable("Licensing__LicenseFilePath");
+        var previousSalt = Environment.GetEnvironmentVariable("Licensing__FingerprintSalt");
+        var previousProduct = Environment.GetEnvironmentVariable("Licensing__LicensedProductName");
+
+        try
+        {
+            var databasePath = Path.Combine(Path.GetTempPath(), $"invoice-manager-broken-{Guid.NewGuid():N}.db");
+            Environment.SetEnvironmentVariable("Database__Provider", "Sqlite");
+            Environment.SetEnvironmentVariable("ConnectionStrings__DefaultConnection", $"Data Source={databasePath}");
+            Environment.SetEnvironmentVariable("Jwt__Issuer", "test");
+            Environment.SetEnvironmentVariable("Jwt__Audience", "test");
+            Environment.SetEnvironmentVariable("Jwt__SigningKey", "");
+            Environment.SetEnvironmentVariable("Uploads__Path", Path.Combine(Path.GetTempPath(), "invoice-manager-broken-uploads"));
+            Environment.SetEnvironmentVariable("Licensing__LicenseFilePath", Path.Combine(Path.GetTempPath(), "invoice-manager-broken-license.json"));
+            Environment.SetEnvironmentVariable("Licensing__FingerprintSalt", "broken-salt");
+            Environment.SetEnvironmentVariable("Licensing__LicensedProductName", "Invoice Manager");
+
+            var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment("Development");
+            });
+
+            await Assert.ThrowsAnyAsync<Exception>(async () =>
+            {
+                using var client = factory.CreateClient();
+                await client.GetAsync("/api/health");
+            });
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("Database__Provider", previousProvider);
+            Environment.SetEnvironmentVariable("ConnectionStrings__DefaultConnection", previousConnection);
+            Environment.SetEnvironmentVariable("Jwt__Issuer", previousIssuer);
+            Environment.SetEnvironmentVariable("Jwt__Audience", previousAudience);
+            Environment.SetEnvironmentVariable("Jwt__SigningKey", previousSigningKey);
+            Environment.SetEnvironmentVariable("Uploads__Path", previousUploads);
+            Environment.SetEnvironmentVariable("Licensing__LicenseFilePath", previousLicensePath);
+            Environment.SetEnvironmentVariable("Licensing__FingerprintSalt", previousSalt);
+            Environment.SetEnvironmentVariable("Licensing__LicensedProductName", previousProduct);
+        }
+    }
+}
