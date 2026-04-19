@@ -37,6 +37,79 @@ public sealed class BillsFlowTests(TestApiFactory factory) : IClassFixture<TestA
     }
 
     [Fact]
+    public async Task BillCrud_CanCreateUpdateAndDeleteBill_WithAuditTrail()
+    {
+        await AuthorizeAsync();
+        var categoryId = await GetCategoryIdAsync("Electricity");
+
+        var createResponse = await _client.PostAsJsonAsync("/api/bills", new
+        {
+            type = "Electricity",
+            billCategoryId = categoryId,
+            paymentStatus = "Pending",
+            referenceNumber = "ELE-CRUD-001",
+            customerName = "CRUD Customer",
+            propertyName = "CRUD Tower",
+            providerName = "City Power",
+            accountNumber = "ACC-CRUD-001",
+            amount = 8888.50m,
+            currency = "twd",
+            periodStart = "2026-04-01",
+            periodEnd = "2026-04-30",
+            issueDate = "2026-05-01",
+            dueDate = "2026-05-18",
+            paidDate = (string?)null,
+            notes = "created from CRUD test",
+            keywords = "crud electricity"
+        });
+
+        createResponse.EnsureSuccessStatusCode();
+        var created = await createResponse.Content.ReadFromJsonAsync<BillDetailDto>(TestJson.Options);
+        Assert.NotNull(created);
+        Assert.Equal("TWD", created!.Currency);
+
+        var updateResponse = await _client.PutAsJsonAsync($"/api/bills/{created.Id}", new
+        {
+            type = "Electricity",
+            billCategoryId = categoryId,
+            paymentStatus = "Paid",
+            referenceNumber = "ELE-CRUD-001",
+            customerName = "CRUD Customer Updated",
+            propertyName = "CRUD Tower",
+            providerName = "City Power",
+            accountNumber = "ACC-CRUD-001",
+            amount = 9000.00m,
+            currency = "twd",
+            periodStart = "2026-04-01",
+            periodEnd = "2026-04-30",
+            issueDate = "2026-05-01",
+            dueDate = "2026-05-18",
+            paidDate = "2026-05-16",
+            notes = "updated from CRUD test",
+            keywords = "crud electricity paid"
+        });
+
+        updateResponse.EnsureSuccessStatusCode();
+        var updated = await updateResponse.Content.ReadFromJsonAsync<BillDetailDto>(TestJson.Options);
+        Assert.NotNull(updated);
+        Assert.Equal("Paid", updated!.PaymentStatus.ToString());
+        Assert.Equal("CRUD Customer Updated", updated.CustomerName);
+        Assert.Equal("2026-05-16", updated.PaidDate?.ToString("yyyy-MM-dd"));
+
+        var deleteResponse = await _client.DeleteAsync($"/api/bills/{created.Id}");
+        Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
+
+        var getDeletedResponse = await _client.GetAsync($"/api/bills/{created.Id}");
+        Assert.Equal(HttpStatusCode.NotFound, getDeletedResponse.StatusCode);
+
+        var audit = await _client.GetFromJsonAsync<PagedResult<AuditLogDto>>("/api/audit-logs", TestJson.Options);
+        Assert.NotNull(audit);
+        Assert.Contains(audit!.Items, item => item.Action == "bill.created" && item.EntityId == created.Id.ToString());
+        Assert.Contains(audit.Items, item => item.Action == "bill.updated" && item.EntityId == created.Id.ToString());
+        Assert.Contains(audit.Items, item => item.Action == "bill.deleted" && item.EntityId == created.Id.ToString());
+    }
+
+    [Fact]
     public async Task CreatingBill_ThenUploadingAttachment_WritesAuditLog()
     {
         await AuthorizeAsync();
@@ -119,6 +192,45 @@ public sealed class BillsFlowTests(TestApiFactory factory) : IClassFixture<TestA
     }
 
     [Fact]
+    public async Task BillsEndpoint_CanFilterByDueDateRangeAndKeyword()
+    {
+        await AuthorizeAsync();
+        var categoryId = await GetCategoryIdAsync("Gas");
+
+        await CreateBillAsync(
+            "Gas",
+            categoryId,
+            "GAS-FILTER-001",
+            "Filter Customer",
+            "Warehouse A",
+            "North Gas",
+            "ACC-GAS-001",
+            3000m,
+            "2026-06-10",
+            "special-filter-keyword");
+
+        await CreateBillAsync(
+            "Gas",
+            categoryId,
+            "GAS-FILTER-002",
+            "Outside Customer",
+            "Warehouse B",
+            "North Gas",
+            "ACC-GAS-002",
+            3200m,
+            "2026-07-20",
+            "outside-window");
+
+        var filtered = await _client.GetFromJsonAsync<PagedResult<BillListItemDto>>(
+            "/api/bills?dueDateFrom=2026-06-01&dueDateTo=2026-06-30&keyword=special-filter-keyword",
+            TestJson.Options);
+
+        Assert.NotNull(filtered);
+        Assert.Contains(filtered!.Items, item => item.ReferenceNumber == "GAS-FILTER-001");
+        Assert.DoesNotContain(filtered.Items, item => item.ReferenceNumber == "GAS-FILTER-002");
+    }
+
+    [Fact]
     public async Task Viewer_CannotCreateBill()
     {
         var auth = await TestAuthHelper.LoginAsViewerAsync(_client);
@@ -164,6 +276,20 @@ public sealed class BillsFlowTests(TestApiFactory factory) : IClassFixture<TestA
     }
 
     [Fact]
+    public async Task UploadingOversizedAttachment_ReturnsValidationProblem()
+    {
+        await AuthorizeAsync();
+        var billId = await GetFirstBillIdAsync();
+
+        using var formData = new MultipartFormDataContent();
+        formData.Add(new ByteArrayContent(new byte[10 * 1024 * 1024 + 1]), "file", "too-large.pdf");
+
+        var response = await _client.PostAsync($"/api/bills/{billId}/attachments", formData);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
     public async Task BillsEndpoint_CanFilterByAttachmentPresence()
     {
         await AuthorizeAsync();
@@ -182,6 +308,42 @@ public sealed class BillsFlowTests(TestApiFactory factory) : IClassFixture<TestA
         Assert.Contains(withAttachments!.Items, bill => bill.Id == billId && bill.AttachmentCount > 0);
         Assert.NotNull(withoutAttachments);
         Assert.DoesNotContain(withoutAttachments!.Items, bill => bill.Id == billId);
+    }
+
+    private async Task CreateBillAsync(
+        string type,
+        Guid categoryId,
+        string referenceNumber,
+        string customerName,
+        string propertyName,
+        string providerName,
+        string accountNumber,
+        decimal amount,
+        string dueDate,
+        string keywords)
+    {
+        var response = await _client.PostAsJsonAsync("/api/bills", new
+        {
+            type,
+            billCategoryId = categoryId,
+            paymentStatus = "Pending",
+            referenceNumber,
+            customerName,
+            propertyName,
+            providerName,
+            accountNumber,
+            amount,
+            currency = "TWD",
+            periodStart = "2026-05-01",
+            periodEnd = "2026-05-31",
+            issueDate = "2026-06-01",
+            dueDate,
+            paidDate = (string?)null,
+            notes = $"{referenceNumber} notes",
+            keywords
+        });
+
+        response.EnsureSuccessStatusCode();
     }
 
     private async Task AuthorizeAsync()

@@ -93,7 +93,6 @@ public sealed class DashboardService(
             bills.Where(x => x.PaymentStatus != PaymentStatus.Paid).Sum(x => x.Amount),
             byType,
             dueSoon,
-            dueSoon,
             overdue,
             latestUploads,
             new StorageUsageSummaryDto(fileCount, totalBytes, storagePath));

@@ -105,15 +105,6 @@ export type DashboardSummary = {
   overdueAmount: number;
   totalUnpaidAmount: number;
   byType: { type: BillType; count: number; amount: number }[];
-  upcomingDueBills: {
-    id: string;
-    referenceNumber: string;
-    customerName: string;
-    type: BillType;
-    paymentStatus: PaymentStatus;
-    dueDate: string;
-    amount: number;
-  }[];
   dueSoonBills: {
     id: string;
     referenceNumber: string;

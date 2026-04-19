@@ -14,7 +14,6 @@ public sealed record DashboardSummaryDto(
     decimal OverdueAmount,
     decimal TotalUnpaidAmount,
     IReadOnlyCollection<BillTypeSummaryDto> ByType,
-    IReadOnlyCollection<UpcomingDueBillDto> UpcomingDueBills,
     IReadOnlyCollection<UpcomingDueBillDto> DueSoonBills,
     IReadOnlyCollection<UpcomingDueBillDto> OverdueBillList,
     IReadOnlyCollection<LatestUploadedBillDto> LatestUploadedBills,
