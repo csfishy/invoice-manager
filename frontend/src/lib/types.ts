@@ -98,9 +98,12 @@ export type DashboardSummary = {
   pendingBills: number;
   overdueBills: number;
   paidBills: number;
+  unpaidBills: number;
+  billsDueThisWeek: number;
   totalAmount: number;
   pendingAmount: number;
   overdueAmount: number;
+  totalUnpaidAmount: number;
   byType: { type: BillType; count: number; amount: number }[];
   upcomingDueBills: {
     id: string;
@@ -111,6 +114,37 @@ export type DashboardSummary = {
     dueDate: string;
     amount: number;
   }[];
+  dueSoonBills: {
+    id: string;
+    referenceNumber: string;
+    customerName: string;
+    type: BillType;
+    paymentStatus: PaymentStatus;
+    dueDate: string;
+    amount: number;
+  }[];
+  overdueBillList: {
+    id: string;
+    referenceNumber: string;
+    customerName: string;
+    type: BillType;
+    paymentStatus: PaymentStatus;
+    dueDate: string;
+    amount: number;
+  }[];
+  latestUploadedBills: {
+    billId: string;
+    referenceNumber: string;
+    customerName: string;
+    latestAttachmentName: string;
+    uploadedAtUtc: string;
+    attachmentCount: number;
+  }[];
+  storageUsage: {
+    attachmentFileCount: number;
+    attachmentBytes: number;
+    storagePath: string;
+  };
 };
 
 export type AuditLog = {
@@ -180,4 +214,38 @@ export type CategoryFormValues = {
   sortOrder: string;
   isActive: boolean;
   isSystemDefault: boolean;
+};
+
+export type ReminderRule = {
+  id: string;
+  name: string;
+  billCategoryId: string | null;
+  billCategoryName: string | null;
+  billType: BillType | null;
+  daysBeforeDue: number;
+  recipient: string;
+  channel: string;
+  isEnabled: boolean;
+  createdAtUtc: string;
+};
+
+export type ReminderRuleFormValues = {
+  name: string;
+  billCategoryId: string;
+  billType: string;
+  daysBeforeDue: string;
+  recipient: string;
+  channel: string;
+  isEnabled: boolean;
+};
+
+export type BillReportSummary = {
+  billCount: number;
+  paidCount: number;
+  unpaidCount: number;
+  overdueCount: number;
+  totalAmount: number;
+  unpaidAmount: number;
+  overdueAmount: number;
+  items: BillListItem[];
 };

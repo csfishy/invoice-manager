@@ -13,6 +13,7 @@ import type {
   BillDetail,
   BillFormValues,
   BillListItem,
+  BillReportSummary,
   BillType,
   CategoryFormValues,
   CurrentUser,
@@ -22,10 +23,12 @@ import type {
   LicenseStatus,
   PagedResult,
   PaymentStatus,
+  ReminderRule,
+  ReminderRuleFormValues,
   UserRole,
 } from "@/lib/types";
 
-type View = "dashboard" | "bills" | "categories" | "audit" | "license";
+type View = "dashboard" | "bills" | "categories" | "reminders" | "audit" | "license";
 type BillFilters = {
   billType: string;
   paymentStatus: string;
@@ -75,6 +78,16 @@ const emptyCategoryForm: CategoryFormValues = {
   isSystemDefault: false,
 };
 
+const emptyReminderRuleForm: ReminderRuleFormValues = {
+  name: "",
+  billCategoryId: "",
+  billType: "",
+  daysBeforeDue: "3",
+  recipient: "",
+  channel: "InApp",
+  isEnabled: true,
+};
+
 const emptyFilters: BillFilters = {
   billType: "",
   paymentStatus: "",
@@ -109,9 +122,11 @@ export function InvoiceManagerApp() {
   const [selectedBill, setSelectedBill] = useState<BillDetail | null>(null);
   const [categories, setCategories] = useState<BillCategory[]>([]);
   const [auditLogs, setAuditLogs] = useState<PagedResult<AuditLog> | null>(null);
+  const [reminderRules, setReminderRules] = useState<ReminderRule[]>([]);
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
   const [fingerprint, setFingerprint] = useState<LicenseFingerprint | null>(null);
   const [requestCode, setRequestCode] = useState<LicenseRequestCode | null>(null);
+  const [reportSummary, setReportSummary] = useState<BillReportSummary | null>(null);
 
   const [filters, setFilters] = useState<BillFilters>(emptyFilters);
   const [billForm, setBillForm] = useState<BillFormValues>(emptyBillForm);
@@ -121,6 +136,9 @@ export function InvoiceManagerApp() {
   const [categoryForm, setCategoryForm] = useState<CategoryFormValues>(emptyCategoryForm);
   const [categoryErrors, setCategoryErrors] = useState<Record<string, string>>({});
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [reminderRuleForm, setReminderRuleForm] = useState<ReminderRuleFormValues>(emptyReminderRuleForm);
+  const [reminderRuleErrors, setReminderRuleErrors] = useState<Record<string, string>>({});
+  const [editingReminderRuleId, setEditingReminderRuleId] = useState<string | null>(null);
 
   const canEditBills = currentUser?.role === "Admin" || currentUser?.role === "Operator";
   const isAdmin = currentUser?.role === "Admin";
@@ -193,6 +211,7 @@ export function InvoiceManagerApp() {
         loadDashboard(activeToken),
         loadBills(activeToken, 1, emptyFilters),
         me.role === "Admin" ? loadAuditLogs(activeToken) : Promise.resolve(),
+        me.role === "Admin" ? loadReminderRules(activeToken) : Promise.resolve(),
       ]);
 
       setBillForm((previous) => ({
@@ -239,6 +258,13 @@ export function InvoiceManagerApp() {
         await loadCategories(activeToken, true);
       }
 
+      if (activeView === "reminders" && role === "Admin") {
+        await Promise.all([
+          loadReminderRules(activeToken),
+          loadCategories(activeToken, true),
+        ]);
+      }
+
       if (activeView === "audit" && role === "Admin") {
         await loadAuditLogs(activeToken);
       }
@@ -275,15 +301,18 @@ export function InvoiceManagerApp() {
     setBills(null);
     setCategories([]);
     setAuditLogs(null);
+    setReminderRules([]);
     setLicenseStatus(null);
     setFingerprint(null);
     setRequestCode(null);
+    setReportSummary(null);
     setSelectedBill(null);
     setEditingBillId(null);
     setEditingCategoryId(null);
     setFilters(emptyFilters);
     setBillForm(emptyBillForm);
     setCategoryForm(emptyCategoryForm);
+    setReminderRuleForm(emptyReminderRuleForm);
   }
 
   async function loadDashboard(activeToken: string) {
@@ -295,18 +324,7 @@ export function InvoiceManagerApp() {
   }
 
   async function loadBills(activeToken: string, page: number, activeFilters: BillFilters) {
-    const query = new URLSearchParams();
-    if (activeFilters.billType) query.set("billType", activeFilters.billType);
-    if (activeFilters.paymentStatus) query.set("paymentStatus", activeFilters.paymentStatus);
-    if (activeFilters.issueDateFrom) query.set("issueDateFrom", activeFilters.issueDateFrom);
-    if (activeFilters.issueDateTo) query.set("issueDateTo", activeFilters.issueDateTo);
-    if (activeFilters.dueDateFrom) query.set("dueDateFrom", activeFilters.dueDateFrom);
-    if (activeFilters.dueDateTo) query.set("dueDateTo", activeFilters.dueDateTo);
-    if (activeFilters.periodFrom) query.set("periodFrom", activeFilters.periodFrom);
-    if (activeFilters.periodTo) query.set("periodTo", activeFilters.periodTo);
-    if (activeFilters.customer) query.set("customer", activeFilters.customer);
-    if (activeFilters.keyword) query.set("keyword", activeFilters.keyword);
-    if (activeFilters.hasAttachment) query.set("hasAttachment", activeFilters.hasAttachment);
+    const query = buildBillSearchParams(activeFilters);
     query.set("page", String(page));
     query.set("pageSize", "12");
 
@@ -345,6 +363,14 @@ export function InvoiceManagerApp() {
     setAuditLogs(response);
   }
 
+  async function loadReminderRules(activeToken: string) {
+    const response = await apiRequest<ReminderRule[]>("/api/reminder-rules", {
+      token: activeToken,
+    });
+
+    setReminderRules(response);
+  }
+
   async function loadLicense(activeToken: string) {
     const [status, machineFingerprint, nextRequestCode] = await Promise.all([
       apiRequest<LicenseStatus>("/api/license/status", { token: activeToken }),
@@ -364,6 +390,30 @@ export function InvoiceManagerApp() {
     }
 
     await loadBills(token, 1, { ...filters, page: 1 });
+  }
+
+  async function exportBillsCsv() {
+    if (!token) {
+      return;
+    }
+
+    const query = buildBillSearchParams(filters);
+    await downloadFile(`/api/bills/export/csv?${query.toString()}`, token, "bills-export.csv");
+  }
+
+  async function openPrintableReport() {
+    if (!token) {
+      return;
+    }
+
+    const query = buildBillSearchParams(filters);
+    const summary = await apiRequest<BillReportSummary>(`/api/reports/bills/summary?${query.toString()}`, {
+      token,
+    });
+    setReportSummary(summary);
+
+    const printUrl = `/reports/bills/print?${query.toString()}`;
+    window.open(printUrl, "_blank", "noopener,noreferrer");
   }
 
   function beginCreateBill() {
@@ -606,6 +656,91 @@ export function InvoiceManagerApp() {
     }
   }
 
+  function beginCreateReminderRule() {
+    setEditingReminderRuleId(null);
+    setReminderRuleErrors({});
+    setReminderRuleForm(emptyReminderRuleForm);
+  }
+
+  function beginEditReminderRule(rule: ReminderRule) {
+    setEditingReminderRuleId(rule.id);
+    setReminderRuleErrors({});
+    setReminderRuleForm({
+      name: rule.name,
+      billCategoryId: rule.billCategoryId ?? "",
+      billType: rule.billType ?? "",
+      daysBeforeDue: String(rule.daysBeforeDue),
+      recipient: rule.recipient,
+      channel: rule.channel,
+      isEnabled: rule.isEnabled,
+    });
+  }
+
+  async function saveReminderRule() {
+    if (!token) {
+      return;
+    }
+
+    setReminderRuleErrors({});
+
+    try {
+      const payload = {
+        name: reminderRuleForm.name,
+        billCategoryId: reminderRuleForm.billCategoryId || null,
+        billType: reminderRuleForm.billType || null,
+        daysBeforeDue: Number(reminderRuleForm.daysBeforeDue),
+        recipient: reminderRuleForm.recipient,
+        channel: reminderRuleForm.channel,
+        isEnabled: reminderRuleForm.isEnabled,
+      };
+
+      if (editingReminderRuleId) {
+        await apiRequest<ReminderRule>(`/api/reminder-rules/${editingReminderRuleId}`, {
+          method: "PUT",
+          token,
+          body: payload,
+        });
+        setMessage(`Reminder rule ${payload.name} updated.`);
+      } else {
+        await apiRequest<ReminderRule>("/api/reminder-rules", {
+          method: "POST",
+          token,
+          body: payload,
+        });
+        setMessage(`Reminder rule ${payload.name} created.`);
+      }
+
+      beginCreateReminderRule();
+      await loadReminderRules(token);
+    } catch (error) {
+      if (error instanceof ApiError && isValidationPayload(error.payload)) {
+        setReminderRuleErrors(flattenErrors(error.payload.errors));
+        return;
+      }
+
+      setMessage(error instanceof Error ? error.message : "Unable to save reminder rule.");
+    }
+  }
+
+  async function deleteReminderRule(rule: ReminderRule) {
+    if (!token) {
+      return;
+    }
+
+    if (!window.confirm(`Delete reminder rule ${rule.name}?`)) {
+      return;
+    }
+
+    await apiRequest(`/api/reminder-rules/${rule.id}`, {
+      method: "DELETE",
+      token,
+    });
+
+    setMessage(`Reminder rule ${rule.name} deleted.`);
+    beginCreateReminderRule();
+    await loadReminderRules(token);
+  }
+
   async function importLicense(file: File) {
     if (!token) {
       return;
@@ -712,6 +847,11 @@ export function InvoiceManagerApp() {
           </Button>
         ) : null}
         {isAdmin ? (
+          <Button variant={activeView === "reminders" ? "primary" : "secondary"} onClick={() => setActiveView("reminders")}>
+            Reminders
+          </Button>
+        ) : null}
+        {isAdmin ? (
           <Button variant={activeView === "audit" ? "primary" : "secondary"} onClick={() => setActiveView("audit")}>
             Audit Logs
           </Button>
@@ -730,14 +870,15 @@ export function InvoiceManagerApp() {
         <section className="stack">
           <div className="metrics-grid">
             <MetricCard label="Total Bills" value={dashboard.totalBills} />
-            <MetricCard label="Pending Bills" value={dashboard.pendingBills} />
+            <MetricCard label="Bills Due This Week" value={dashboard.billsDueThisWeek} />
             <MetricCard label="Overdue Bills" value={dashboard.overdueBills} tone="danger" />
             <MetricCard label="Paid Bills" value={dashboard.paidBills} tone="success" />
           </div>
 
           <div className="metrics-grid">
             <MetricCard label="Total Amount" value={formatCurrency(dashboard.totalAmount)} />
-            <MetricCard label="Pending Amount" value={formatCurrency(dashboard.pendingAmount)} />
+            <MetricCard label="Total Unpaid Amount" value={formatCurrency(dashboard.totalUnpaidAmount)} />
+            <MetricCard label="Unpaid Bills" value={dashboard.unpaidBills} />
             <MetricCard label="Overdue Amount" value={formatCurrency(dashboard.overdueAmount)} tone="danger" />
           </div>
 
@@ -756,9 +897,9 @@ export function InvoiceManagerApp() {
               </div>
             </Panel>
 
-            <Panel title="Upcoming Due Bills">
+            <Panel title="Due Soon">
               <div className="summary-list">
-                {dashboard.upcomingDueBills.map((item) => (
+                {dashboard.dueSoonBills.map((item) => (
                   <div key={item.id} className="summary-row">
                     <div>
                       <strong>{item.referenceNumber}</strong>
@@ -773,6 +914,53 @@ export function InvoiceManagerApp() {
               </div>
             </Panel>
           </div>
+
+          <div className="two-column">
+            <Panel title="Overdue Bills">
+              <div className="summary-list">
+                {dashboard.overdueBillList.map((item) => (
+                  <div key={item.id} className="summary-row">
+                    <div>
+                      <strong>{item.referenceNumber}</strong>
+                      <span>{item.customerName}</span>
+                    </div>
+                    <div>
+                      <StatusBadge label={item.paymentStatus} />
+                      <span>{formatCurrency(item.amount)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+
+            <Panel title="Latest Uploaded Bills">
+              <div className="summary-list">
+                {dashboard.latestUploadedBills.map((item) => (
+                  <div key={item.billId} className="summary-row">
+                    <div>
+                      <strong>{item.referenceNumber}</strong>
+                      <span>{item.customerName}</span>
+                    </div>
+                    <div>
+                      <span>{item.latestAttachmentName}</span>
+                      <span>{new Date(item.uploadedAtUtc).toLocaleString()}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          </div>
+
+          {isAdmin ? (
+            <Panel title="Storage Usage">
+              <div className="detail-grid">
+                <DetailItem label="Attachment Files" value={String(dashboard.storageUsage.attachmentFileCount)} />
+                <DetailItem label="Storage Used" value={formatBytes(dashboard.storageUsage.attachmentBytes)} />
+                <DetailItem label="Storage Path" value={dashboard.storageUsage.storagePath} />
+                <DetailItem label="Pending Amount" value={formatCurrency(dashboard.pendingAmount)} />
+              </div>
+            </Panel>
+          ) : null}
         </section>
       ) : null}
 
@@ -784,6 +972,12 @@ export function InvoiceManagerApp() {
               <div className="toolbar">
                 <Button variant="secondary" onClick={() => void handleBillSearch()}>
                   Search
+                </Button>
+                <Button variant="secondary" onClick={() => void exportBillsCsv()}>
+                  Export CSV
+                </Button>
+                <Button variant="secondary" onClick={() => void openPrintableReport()}>
+                  Printable Report
                 </Button>
                 <Button
                   variant="ghost"
@@ -1291,6 +1485,19 @@ export function InvoiceManagerApp() {
               </div>
             </Panel>
           ) : null}
+
+          {reportSummary ? (
+            <Panel title="Filtered Report Snapshot">
+              <div className="detail-grid">
+                <DetailItem label="Bills" value={String(reportSummary.billCount)} />
+                <DetailItem label="Paid" value={String(reportSummary.paidCount)} />
+                <DetailItem label="Unpaid" value={String(reportSummary.unpaidCount)} />
+                <DetailItem label="Overdue" value={String(reportSummary.overdueCount)} />
+                <DetailItem label="Total Amount" value={formatCurrency(reportSummary.totalAmount)} />
+                <DetailItem label="Unpaid Amount" value={formatCurrency(reportSummary.unpaidAmount)} />
+              </div>
+            </Panel>
+          ) : null}
         </section>
       ) : null}
 
@@ -1403,6 +1610,120 @@ export function InvoiceManagerApp() {
                       Edit
                     </Button>
                     <Button variant="ghost" onClick={() => void deleteCategory(category)}>
+                      Delete
+                    </Button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </Panel>
+        </section>
+      ) : null}
+
+      {activeView === "reminders" && isAdmin ? (
+        <section className="two-column">
+          <Panel
+            title="Reminder Rule Settings"
+            actions={
+              <div className="toolbar">
+                <Button variant="secondary" onClick={beginCreateReminderRule}>
+                  Clear
+                </Button>
+                <Button onClick={() => void saveReminderRule()}>
+                  {editingReminderRuleId ? "Update Rule" : "Create Rule"}
+                </Button>
+              </div>
+            }
+          >
+            <div className="field-grid">
+              <Field label="Name" error={reminderRuleErrors.name}>
+                <TextInput
+                  value={reminderRuleForm.name}
+                  onChange={(event) => setReminderRuleForm((previous) => ({ ...previous, name: event.target.value }))}
+                />
+              </Field>
+
+              <Field label="Bill Type">
+                <select
+                  className="input"
+                  value={reminderRuleForm.billType}
+                  onChange={(event) => setReminderRuleForm((previous) => ({ ...previous, billType: event.target.value }))}
+                >
+                  <option value="">Any</option>
+                  {billTypes.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field label="Category">
+                <select
+                  className="input"
+                  value={reminderRuleForm.billCategoryId}
+                  onChange={(event) => setReminderRuleForm((previous) => ({ ...previous, billCategoryId: event.target.value }))}
+                >
+                  <option value="">Any</option>
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field label="Days Before Due" error={reminderRuleErrors.daysBeforeDue}>
+                <TextInput
+                  type="number"
+                  min="0"
+                  value={reminderRuleForm.daysBeforeDue}
+                  onChange={(event) => setReminderRuleForm((previous) => ({ ...previous, daysBeforeDue: event.target.value }))}
+                />
+              </Field>
+
+              <Field label="Recipient" error={reminderRuleErrors.recipient}>
+                <TextInput
+                  value={reminderRuleForm.recipient}
+                  onChange={(event) => setReminderRuleForm((previous) => ({ ...previous, recipient: event.target.value }))}
+                />
+              </Field>
+
+              <Field label="Channel" error={reminderRuleErrors.channel}>
+                <TextInput
+                  value={reminderRuleForm.channel}
+                  onChange={(event) => setReminderRuleForm((previous) => ({ ...previous, channel: event.target.value }))}
+                />
+              </Field>
+            </div>
+
+            <label className="upload-button">
+              <input
+                type="checkbox"
+                checked={reminderRuleForm.isEnabled}
+                onChange={(event) => setReminderRuleForm((previous) => ({ ...previous, isEnabled: event.target.checked }))}
+              />
+              <span style={{ marginLeft: 8 }}>Enabled</span>
+            </label>
+          </Panel>
+
+          <Panel title="Configured Reminder Rules">
+            <div className="summary-list">
+              {reminderRules.map((rule) => (
+                <article key={rule.id} className="summary-row">
+                  <div>
+                    <strong>{rule.name}</strong>
+                    <span>
+                      {rule.billType ?? "Any"} | {rule.billCategoryName ?? "Any Category"} | {rule.daysBeforeDue} days | {rule.channel}
+                    </span>
+                    <span>{rule.recipient}</span>
+                  </div>
+                  <div className="toolbar">
+                    <StatusBadge label={rule.isEnabled ? "Active" : "Inactive"} />
+                    <Button variant="secondary" onClick={() => beginEditReminderRule(rule)}>
+                      Edit
+                    </Button>
+                    <Button variant="ghost" onClick={() => void deleteReminderRule(rule)}>
                       Delete
                     </Button>
                   </div>
@@ -1564,6 +1885,34 @@ function formatCurrency(amount: number, currency = "TWD") {
     currency,
     maximumFractionDigits: 0,
   }).format(amount);
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  if (bytes < 1024 * 1024) {
+    return `${Math.round(bytes / 1024)} KB`;
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function buildBillSearchParams(activeFilters: BillFilters) {
+  const query = new URLSearchParams();
+  if (activeFilters.billType) query.set("billType", activeFilters.billType);
+  if (activeFilters.paymentStatus) query.set("paymentStatus", activeFilters.paymentStatus);
+  if (activeFilters.issueDateFrom) query.set("issueDateFrom", activeFilters.issueDateFrom);
+  if (activeFilters.issueDateTo) query.set("issueDateTo", activeFilters.issueDateTo);
+  if (activeFilters.dueDateFrom) query.set("dueDateFrom", activeFilters.dueDateFrom);
+  if (activeFilters.dueDateTo) query.set("dueDateTo", activeFilters.dueDateTo);
+  if (activeFilters.periodFrom) query.set("periodFrom", activeFilters.periodFrom);
+  if (activeFilters.periodTo) query.set("periodTo", activeFilters.periodTo);
+  if (activeFilters.customer) query.set("customer", activeFilters.customer);
+  if (activeFilters.keyword) query.set("keyword", activeFilters.keyword);
+  if (activeFilters.hasAttachment) query.set("hasAttachment", activeFilters.hasAttachment);
+  return query;
 }
 
 function isValidationPayload(payload: unknown): payload is { errors: Record<string, string[]> } {

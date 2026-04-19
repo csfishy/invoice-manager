@@ -12,6 +12,132 @@ public sealed class BillService(
     IFileStorageService fileStorageService,
     IAuditLogService auditLogService) : IBillService
 {
+    public async Task<IReadOnlyCollection<ReminderRuleDto>> GetReminderRulesAsync(CancellationToken cancellationToken = default)
+    {
+        var rules = await dbContext.ReminderRules
+            .AsNoTracking()
+            .Include(x => x.BillCategory)
+            .OrderBy(x => x.Name)
+            .ToListAsync(cancellationToken);
+
+        return rules.Select(MapReminderRule).ToList();
+    }
+
+    public async Task<ReminderRuleDto?> GetReminderRuleAsync(Guid reminderRuleId, CancellationToken cancellationToken = default)
+    {
+        var rule = await dbContext.ReminderRules
+            .AsNoTracking()
+            .Include(x => x.BillCategory)
+            .Where(x => x.Id == reminderRuleId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return rule is null ? null : MapReminderRule(rule);
+    }
+
+    public async Task<ReminderRuleDto> CreateReminderRuleAsync(
+        Guid actingUserId,
+        string actingUsername,
+        CreateReminderRuleRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        var reminderRule = new ReminderRule
+        {
+            Name = request.Name.Trim(),
+            BillCategoryId = request.BillCategoryId,
+            BillType = request.BillType,
+            DaysBeforeDue = request.DaysBeforeDue,
+            Recipient = request.Recipient.Trim(),
+            Channel = request.Channel.Trim(),
+            IsEnabled = request.IsEnabled
+        };
+
+        if (request.BillCategoryId.HasValue)
+        {
+            reminderRule.BillCategory = await dbContext.BillCategories.FirstOrDefaultAsync(x => x.Id == request.BillCategoryId.Value, cancellationToken);
+        }
+
+        dbContext.ReminderRules.Add(reminderRule);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        await auditLogService.LogAsync(
+            actingUserId,
+            actingUsername,
+            "reminder-rule.created",
+            "ReminderRule",
+            reminderRule.Id.ToString(),
+            $"Created reminder rule {reminderRule.Name}",
+            new { reminderRule.BillType, reminderRule.DaysBeforeDue, reminderRule.Channel, reminderRule.IsEnabled },
+            cancellationToken);
+
+        return MapReminderRule(reminderRule);
+    }
+
+    public async Task<ReminderRuleDto?> UpdateReminderRuleAsync(
+        Guid reminderRuleId,
+        Guid actingUserId,
+        string actingUsername,
+        UpdateReminderRuleRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        var reminderRule = await dbContext.ReminderRules
+            .Include(x => x.BillCategory)
+            .FirstOrDefaultAsync(x => x.Id == reminderRuleId, cancellationToken);
+
+        if (reminderRule is null)
+        {
+            return null;
+        }
+
+        reminderRule.Name = request.Name.Trim();
+        reminderRule.BillCategoryId = request.BillCategoryId;
+        reminderRule.BillType = request.BillType;
+        reminderRule.DaysBeforeDue = request.DaysBeforeDue;
+        reminderRule.Recipient = request.Recipient.Trim();
+        reminderRule.Channel = request.Channel.Trim();
+        reminderRule.IsEnabled = request.IsEnabled;
+        reminderRule.BillCategory = request.BillCategoryId.HasValue
+            ? await dbContext.BillCategories.FirstOrDefaultAsync(x => x.Id == request.BillCategoryId.Value, cancellationToken)
+            : null;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        await auditLogService.LogAsync(
+            actingUserId,
+            actingUsername,
+            "reminder-rule.updated",
+            "ReminderRule",
+            reminderRule.Id.ToString(),
+            $"Updated reminder rule {reminderRule.Name}",
+            new { reminderRule.BillType, reminderRule.DaysBeforeDue, reminderRule.Channel, reminderRule.IsEnabled },
+            cancellationToken);
+
+        return MapReminderRule(reminderRule);
+    }
+
+    public async Task<bool> DeleteReminderRuleAsync(Guid reminderRuleId, Guid actingUserId, string actingUsername, CancellationToken cancellationToken = default)
+    {
+        var reminderRule = await dbContext.ReminderRules.FirstOrDefaultAsync(x => x.Id == reminderRuleId, cancellationToken);
+        if (reminderRule is null)
+        {
+            return false;
+        }
+
+        dbContext.ReminderRules.Remove(reminderRule);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        await auditLogService.LogAsync(
+            actingUserId,
+            actingUsername,
+            "reminder-rule.deleted",
+            "ReminderRule",
+            reminderRule.Id.ToString(),
+            $"Deleted reminder rule {reminderRule.Name}",
+            new { reminderRule.BillType, reminderRule.Recipient },
+            cancellationToken);
+
+        return true;
+    }
+
     public async Task<IReadOnlyCollection<BillCategoryDto>> GetCategoriesAsync(bool includeInactive = false, CancellationToken cancellationToken = default)
     {
         var query = dbContext.BillCategories
@@ -24,21 +150,24 @@ public sealed class BillService(
             query = query.Where(x => x.IsActive);
         }
 
-        return await query
+        var categories = await query
             .OrderBy(x => x.Type)
             .ThenBy(x => x.SortOrder)
             .ThenBy(x => x.Name)
-            .Select(x => MapCategory(x, x.Bills.Count))
             .ToListAsync(cancellationToken);
+
+        return categories.Select(x => MapCategory(x, x.Bills.Count)).ToList();
     }
 
     public async Task<BillCategoryDto?> GetCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default)
     {
-        return await dbContext.BillCategories
+        var category = await dbContext.BillCategories
             .AsNoTracking()
+            .Include(x => x.Bills)
             .Where(x => x.Id == categoryId)
-            .Select(x => MapCategory(x, x.Bills.Count))
             .FirstOrDefaultAsync(cancellationToken);
+
+        return category is null ? null : MapCategory(category, category.Bills.Count);
     }
 
     public async Task<BillCategoryDto> CreateCategoryAsync(
@@ -165,78 +294,7 @@ public sealed class BillService(
 
     public async Task<PagedResult<BillListItemDto>> GetBillsAsync(BillQueryDto query, CancellationToken cancellationToken = default)
     {
-        var normalizedCustomer = query.Customer?.Trim().ToLowerInvariant();
-        var normalizedKeyword = query.Keyword?.Trim().ToLowerInvariant();
-
-        var billQuery = dbContext.Bills
-            .AsNoTracking()
-            .Include(x => x.BillCategory)
-            .Include(x => x.Attachments)
-            .AsQueryable();
-
-        if (query.BillType.HasValue)
-        {
-            billQuery = billQuery.Where(x => x.Type == query.BillType.Value);
-        }
-
-        if (query.PaymentStatus.HasValue)
-        {
-            billQuery = billQuery.Where(x => x.PaymentStatus == query.PaymentStatus.Value);
-        }
-
-        if (query.IssueDateFrom.HasValue)
-        {
-            billQuery = billQuery.Where(x => x.IssueDate >= query.IssueDateFrom.Value);
-        }
-
-        if (query.IssueDateTo.HasValue)
-        {
-            billQuery = billQuery.Where(x => x.IssueDate <= query.IssueDateTo.Value);
-        }
-
-        if (query.DueDateFrom.HasValue)
-        {
-            billQuery = billQuery.Where(x => x.DueDate >= query.DueDateFrom.Value);
-        }
-
-        if (query.DueDateTo.HasValue)
-        {
-            billQuery = billQuery.Where(x => x.DueDate <= query.DueDateTo.Value);
-        }
-
-        if (query.PeriodFrom.HasValue)
-        {
-            billQuery = billQuery.Where(x => x.PeriodEnd >= query.PeriodFrom.Value);
-        }
-
-        if (query.PeriodTo.HasValue)
-        {
-            billQuery = billQuery.Where(x => x.PeriodStart <= query.PeriodTo.Value);
-        }
-
-        if (!string.IsNullOrWhiteSpace(normalizedCustomer))
-        {
-            billQuery = billQuery.Where(x => x.CustomerName.ToLower().Contains(normalizedCustomer));
-        }
-
-        if (!string.IsNullOrWhiteSpace(normalizedKeyword))
-        {
-            billQuery = billQuery.Where(x =>
-                x.ReferenceNumber.ToLower().Contains(normalizedKeyword) ||
-                x.CustomerName.ToLower().Contains(normalizedKeyword) ||
-                x.PropertyName.ToLower().Contains(normalizedKeyword) ||
-                x.ProviderName.ToLower().Contains(normalizedKeyword) ||
-                x.AccountNumber.ToLower().Contains(normalizedKeyword) ||
-                x.Keywords.ToLower().Contains(normalizedKeyword) ||
-                x.Notes.ToLower().Contains(normalizedKeyword));
-        }
-
-        if (query.HasAttachment.HasValue)
-        {
-            billQuery = query.HasAttachment.Value
-                ? billQuery.Where(x => x.Attachments.Any())
-                : billQuery.Where(x => !x.Attachments.Any());
-        }
+        var billQuery = BuildBillQuery(query);
 
         var page = Math.Max(query.Page, 1);
         var pageSize = Math.Clamp(query.PageSize, 1, 100);
@@ -269,6 +327,48 @@ public sealed class BillService(
             .ToListAsync(cancellationToken);
 
         return new PagedResult<BillListItemDto>(items, totalCount, page, pageSize);
+    }
+
+    public async Task<IReadOnlyCollection<BillListItemDto>> ExportBillsAsync(BillQueryDto query, CancellationToken cancellationToken = default)
+    {
+        return await BuildBillQuery(query)
+            .OrderBy(x => x.DueDate)
+            .ThenBy(x => x.ReferenceNumber)
+            .Select(x => new BillListItemDto(
+                x.Id,
+                x.ReferenceNumber,
+                x.Type,
+                x.BillCategory != null ? x.BillCategory.Name : x.Type.ToString(),
+                x.PaymentStatus,
+                x.CustomerName,
+                x.PropertyName,
+                x.ProviderName,
+                x.AccountNumber,
+                x.Amount,
+                x.Currency,
+                x.PeriodStart,
+                x.PeriodEnd,
+                x.IssueDate,
+                x.DueDate,
+                x.PaidDate,
+                x.Attachments.Count,
+                x.UpdatedAtUtc))
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<BillReportSummaryDto> GetBillReportSummaryAsync(BillQueryDto query, CancellationToken cancellationToken = default)
+    {
+        var items = await ExportBillsAsync(query, cancellationToken);
+
+        return new BillReportSummaryDto(
+            items.Count,
+            items.Count(x => x.PaymentStatus == PaymentStatus.Paid),
+            items.Count(x => x.PaymentStatus != PaymentStatus.Paid),
+            items.Count(x => x.PaymentStatus == PaymentStatus.Overdue),
+            items.Sum(x => x.Amount),
+            items.Where(x => x.PaymentStatus != PaymentStatus.Paid).Sum(x => x.Amount),
+            items.Where(x => x.PaymentStatus == PaymentStatus.Overdue).Sum(x => x.Amount),
+            items);
     }
 
     public async Task<BillDetailDto?> GetBillAsync(Guid billId, CancellationToken cancellationToken = default)
@@ -567,6 +667,99 @@ public sealed class BillService(
             category.IsSystemDefault,
             category.CreatedAtUtc,
             billCount);
+    }
+
+    private static ReminderRuleDto MapReminderRule(ReminderRule reminderRule)
+    {
+        return new ReminderRuleDto(
+            reminderRule.Id,
+            reminderRule.Name,
+            reminderRule.BillCategoryId,
+            reminderRule.BillCategory?.Name,
+            reminderRule.BillType,
+            reminderRule.DaysBeforeDue,
+            reminderRule.Recipient,
+            reminderRule.Channel,
+            reminderRule.IsEnabled,
+            reminderRule.CreatedAtUtc);
+    }
+
+    private IQueryable<Bill> BuildBillQuery(BillQueryDto query)
+    {
+        var normalizedCustomer = query.Customer?.Trim().ToLowerInvariant();
+        var normalizedKeyword = query.Keyword?.Trim().ToLowerInvariant();
+
+        var billQuery = dbContext.Bills
+            .AsNoTracking()
+            .Include(x => x.BillCategory)
+            .Include(x => x.Attachments)
+            .AsQueryable();
+
+        if (query.BillType.HasValue)
+        {
+            billQuery = billQuery.Where(x => x.Type == query.BillType.Value);
+        }
+
+        if (query.PaymentStatus.HasValue)
+        {
+            billQuery = billQuery.Where(x => x.PaymentStatus == query.PaymentStatus.Value);
+        }
+
+        if (query.IssueDateFrom.HasValue)
+        {
+            billQuery = billQuery.Where(x => x.IssueDate >= query.IssueDateFrom.Value);
+        }
+
+        if (query.IssueDateTo.HasValue)
+        {
+            billQuery = billQuery.Where(x => x.IssueDate <= query.IssueDateTo.Value);
+        }
+
+        if (query.DueDateFrom.HasValue)
+        {
+            billQuery = billQuery.Where(x => x.DueDate >= query.DueDateFrom.Value);
+        }
+
+        if (query.DueDateTo.HasValue)
+        {
+            billQuery = billQuery.Where(x => x.DueDate <= query.DueDateTo.Value);
+        }
+
+        if (query.PeriodFrom.HasValue)
+        {
+            billQuery = billQuery.Where(x => x.PeriodEnd >= query.PeriodFrom.Value);
+        }
+
+        if (query.PeriodTo.HasValue)
+        {
+            billQuery = billQuery.Where(x => x.PeriodStart <= query.PeriodTo.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedCustomer))
+        {
+            billQuery = billQuery.Where(x => x.CustomerName.ToLower().Contains(normalizedCustomer));
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedKeyword))
+        {
+            billQuery = billQuery.Where(x =>
+                x.ReferenceNumber.ToLower().Contains(normalizedKeyword) ||
+                x.CustomerName.ToLower().Contains(normalizedKeyword) ||
+                x.PropertyName.ToLower().Contains(normalizedKeyword) ||
+                x.ProviderName.ToLower().Contains(normalizedKeyword) ||
+                x.AccountNumber.ToLower().Contains(normalizedKeyword) ||
+                x.Keywords.ToLower().Contains(normalizedKeyword) ||
+                x.Notes.ToLower().Contains(normalizedKeyword));
+        }
+
+        if (query.HasAttachment.HasValue)
+        {
+            billQuery = query.HasAttachment.Value
+                ? billQuery.Where(x => x.Attachments.Any())
+                : billQuery.Where(x => !x.Attachments.Any());
+        }
+
+        return billQuery;
     }
 
     private static BillAttachmentDto MapAttachment(BillAttachment attachment)

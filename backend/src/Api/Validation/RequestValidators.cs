@@ -58,6 +58,12 @@ internal static class RequestValidators
     public static Dictionary<string, string[]> Validate(UpdateBillCategoryRequestDto request) =>
         ValidateCategoryCore(request.Name, request.Description, request.SortOrder);
 
+    public static Dictionary<string, string[]> Validate(CreateReminderRuleRequestDto request) =>
+        ValidateReminderRuleCore(request.Name, request.DaysBeforeDue, request.Recipient, request.Channel);
+
+    public static Dictionary<string, string[]> Validate(UpdateReminderRuleRequestDto request) =>
+        ValidateReminderRuleCore(request.Name, request.DaysBeforeDue, request.Recipient, request.Channel);
+
     private static Dictionary<string, string[]> ValidateBillCore(
         Guid billCategoryId,
         string referenceNumber,
@@ -152,6 +158,37 @@ internal static class RequestValidators
         if (sortOrder < 0)
         {
             errors["sortOrder"] = ["Sort order must be zero or greater."];
+        }
+
+        return errors;
+    }
+
+    private static Dictionary<string, string[]> ValidateReminderRuleCore(
+        string name,
+        int daysBeforeDue,
+        string recipient,
+        string channel)
+    {
+        var errors = new Dictionary<string, string[]>();
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            errors["name"] = ["Reminder rule name is required."];
+        }
+
+        if (daysBeforeDue < 0 || daysBeforeDue > 365)
+        {
+            errors["daysBeforeDue"] = ["Days before due must be between 0 and 365."];
+        }
+
+        if (string.IsNullOrWhiteSpace(recipient))
+        {
+            errors["recipient"] = ["Recipient is required."];
+        }
+
+        if (string.IsNullOrWhiteSpace(channel))
+        {
+            errors["channel"] = ["Channel is required."];
         }
 
         return errors;

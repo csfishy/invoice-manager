@@ -10,7 +10,9 @@ Self-hosted bill management system for customer-operated Windows environments.
 - attachment upload and download for bill files
 - attachment validation for PDF and common image formats stored on mounted volume paths
 - search and filtering by bill type, payment status, issue date, due date, billing period, customer, keyword, and attachment presence
-- dashboard summary with totals, by-type metrics, and upcoming due bills
+- dashboard summary with unpaid totals, due-soon and overdue lists, latest uploads, and storage usage
+- reminder rule settings for Admin users
+- CSV export and printable summary reports for filtered bill lists
 - audit log tracking for important actions
 - offline-first machine-bound licensing status and license import
 - offline request-code workflow for vendor-issued signed licenses

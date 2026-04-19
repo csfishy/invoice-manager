@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text;
 using System.Text.Json.Serialization;
 using InvoiceManager.Api.Auth;
 using InvoiceManager.Api.Validation;
@@ -154,6 +155,54 @@ app.MapGet("/api/categories/{categoryId:guid}", async (Guid categoryId, IBillSer
     return category is null ? Results.NotFound() : Results.Ok(category);
 }).RequireAuthorization("Authenticated").AddEndpointFilter<RequireValidLicenseFilter>();
 
+app.MapGet("/api/reminder-rules", async (IBillService billService, CancellationToken cancellationToken) =>
+{
+    return Results.Ok(await billService.GetReminderRulesAsync(cancellationToken));
+}).RequireAuthorization("AdminAccess").AddEndpointFilter<RequireValidLicenseFilter>();
+
+app.MapPost("/api/reminder-rules", async (
+    CreateReminderRuleRequestDto request,
+    ClaimsPrincipal user,
+    IBillService billService,
+    CancellationToken cancellationToken) =>
+{
+    var errors = RequestValidators.Validate(request);
+    if (errors.Count > 0)
+    {
+        return Results.ValidationProblem(errors);
+    }
+
+    var created = await billService.CreateReminderRuleAsync(user.GetRequiredUserId(), user.GetRequiredUsername(), request, cancellationToken);
+    return Results.Created($"/api/reminder-rules/{created.Id}", created);
+}).RequireAuthorization("AdminAccess").AddEndpointFilter<RequireValidLicenseFilter>();
+
+app.MapPut("/api/reminder-rules/{reminderRuleId:guid}", async (
+    Guid reminderRuleId,
+    UpdateReminderRuleRequestDto request,
+    ClaimsPrincipal user,
+    IBillService billService,
+    CancellationToken cancellationToken) =>
+{
+    var errors = RequestValidators.Validate(request);
+    if (errors.Count > 0)
+    {
+        return Results.ValidationProblem(errors);
+    }
+
+    var updated = await billService.UpdateReminderRuleAsync(reminderRuleId, user.GetRequiredUserId(), user.GetRequiredUsername(), request, cancellationToken);
+    return updated is null ? Results.NotFound() : Results.Ok(updated);
+}).RequireAuthorization("AdminAccess").AddEndpointFilter<RequireValidLicenseFilter>();
+
+app.MapDelete("/api/reminder-rules/{reminderRuleId:guid}", async (
+    Guid reminderRuleId,
+    ClaimsPrincipal user,
+    IBillService billService,
+    CancellationToken cancellationToken) =>
+{
+    var deleted = await billService.DeleteReminderRuleAsync(reminderRuleId, user.GetRequiredUserId(), user.GetRequiredUsername(), cancellationToken);
+    return deleted ? Results.NoContent() : Results.NotFound();
+}).RequireAuthorization("AdminAccess").AddEndpointFilter<RequireValidLicenseFilter>();
+
 app.MapPost("/api/categories", async (
     CreateBillCategoryRequestDto request,
     ClaimsPrincipal user,
@@ -222,6 +271,95 @@ app.MapGet("/api/bills/{billId:guid}", async (Guid billId, IBillService billServ
 {
     var bill = await billService.GetBillAsync(billId, cancellationToken);
     return bill is null ? Results.NotFound() : Results.Ok(bill);
+}).RequireAuthorization("Authenticated").AddEndpointFilter<RequireValidLicenseFilter>();
+
+app.MapGet("/api/bills/export/csv", async (
+    BillType? billType,
+    PaymentStatus? paymentStatus,
+    DateOnly? issueDateFrom,
+    DateOnly? issueDateTo,
+    DateOnly? dueDateFrom,
+    DateOnly? dueDateTo,
+    DateOnly? periodFrom,
+    DateOnly? periodTo,
+    string? customer,
+    string? keyword,
+    bool? hasAttachment,
+    IBillService billService,
+    CancellationToken cancellationToken) =>
+{
+    var query = new BillQueryDto(
+        billType,
+        paymentStatus,
+        issueDateFrom,
+        issueDateTo,
+        dueDateFrom,
+        dueDateTo,
+        periodFrom,
+        periodTo,
+        customer,
+        keyword,
+        hasAttachment,
+        1,
+        1000);
+
+    var bills = await billService.ExportBillsAsync(query, cancellationToken);
+    var builder = new StringBuilder();
+    builder.AppendLine("ReferenceNumber,Type,Category,PaymentStatus,CustomerName,PropertyName,ProviderName,AccountNumber,Amount,Currency,IssueDate,DueDate,PaidDate,AttachmentCount");
+
+    foreach (var bill in bills)
+    {
+        builder.AppendLine(string.Join(",",
+            Csv(bill.ReferenceNumber),
+            Csv(bill.Type.ToString()),
+            Csv(bill.CategoryName),
+            Csv(bill.PaymentStatus.ToString()),
+            Csv(bill.CustomerName),
+            Csv(bill.PropertyName),
+            Csv(bill.ProviderName),
+            Csv(bill.AccountNumber),
+            bill.Amount.ToString("0.00"),
+            Csv(bill.Currency),
+            bill.IssueDate.ToString("yyyy-MM-dd"),
+            bill.DueDate.ToString("yyyy-MM-dd"),
+            bill.PaidDate?.ToString("yyyy-MM-dd") ?? string.Empty,
+            bill.AttachmentCount.ToString()));
+    }
+
+    return Results.File(Encoding.UTF8.GetBytes(builder.ToString()), "text/csv", $"bills-{DateTime.UtcNow:yyyyMMddHHmmss}.csv");
+}).RequireAuthorization("Authenticated").AddEndpointFilter<RequireValidLicenseFilter>();
+
+app.MapGet("/api/reports/bills/summary", async (
+    BillType? billType,
+    PaymentStatus? paymentStatus,
+    DateOnly? issueDateFrom,
+    DateOnly? issueDateTo,
+    DateOnly? dueDateFrom,
+    DateOnly? dueDateTo,
+    DateOnly? periodFrom,
+    DateOnly? periodTo,
+    string? customer,
+    string? keyword,
+    bool? hasAttachment,
+    IBillService billService,
+    CancellationToken cancellationToken) =>
+{
+    var query = new BillQueryDto(
+        billType,
+        paymentStatus,
+        issueDateFrom,
+        issueDateTo,
+        dueDateFrom,
+        dueDateTo,
+        periodFrom,
+        periodTo,
+        customer,
+        keyword,
+        hasAttachment,
+        1,
+        1000);
+
+    return Results.Ok(await billService.GetBillReportSummaryAsync(query, cancellationToken));
 }).RequireAuthorization("Authenticated").AddEndpointFilter<RequireValidLicenseFilter>();
 
 app.MapPost("/api/bills", async (
@@ -409,6 +547,12 @@ app.MapPost("/api/license/import", async (
 
     return Results.Ok(result);
 }).RequireAuthorization("AdminAccess");
+
+static string Csv(string value)
+{
+    var normalized = value.Replace("\"", "\"\"");
+    return $"\"{normalized}\"";
+}
 
 app.Run();
 
