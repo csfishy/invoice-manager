@@ -4,7 +4,13 @@ setlocal
 set "ROOT_DIR=%~dp0..\.."
 cd /d "%ROOT_DIR%"
 
-docker compose up -d
+docker version >nul 2>nul
+if errorlevel 1 (
+  echo Docker Desktop is not running. Start Docker Desktop and retry.
+  exit /b 1
+)
+
+docker compose up -d || exit /b 1
 
 echo Services started.
-endlocal
+exit /b 0

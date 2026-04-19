@@ -16,7 +16,13 @@ if not exist "%~1" (
 
 if not exist "data\license" mkdir "data\license"
 
-copy /Y "%~1" "data\license\license.json" > nul
+copy /Y "%~1" "data\license\license.json" >nul
+if errorlevel 1 (
+  echo Failed to copy the license file.
+  exit /b 1
+)
 
 echo License imported to data\license\license.json
-endlocal
+echo Restart backend if the application is already running:
+echo   docker compose restart backend
+exit /b 0

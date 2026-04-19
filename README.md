@@ -81,3 +81,6 @@ The application validates license files using an embedded sample public key. For
 - [API](/D:/Users/csfishy/Documents/GitHub/invoice-manager/docs/spec/api.md)
 - [Licensing](/D:/Users/csfishy/Documents/GitHub/invoice-manager/docs/spec/licensing.md)
 - [Deployment](/D:/Users/csfishy/Documents/GitHub/invoice-manager/docs/spec/deployment.md)
+- [Backup and Restore](/D:/Users/csfishy/Documents/GitHub/invoice-manager/docs/spec/backup-restore.md)
+- [Upgrade Notes](/D:/Users/csfishy/Documents/GitHub/invoice-manager/docs/spec/upgrade-notes.md)
+- [Installation Checklist](/D:/Users/csfishy/Documents/GitHub/invoice-manager/docs/spec/installation-checklist.md)
